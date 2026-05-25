@@ -1,9 +1,11 @@
 use axum::{Router, routing::get};
 
+mod db;
+
 #[tokio::main]
 async fn main() {
     // build our application with a route
-    let app = Router::new().route("/", get(handler));
+    let app = Router::new().route("/health", get(health));
 
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -13,6 +15,6 @@ async fn main() {
     let _ = axum::serve(listener, app).await;
 }
 
-async fn handler() -> &'static str {
-    "Hello, World!"
+async fn health() -> &'static str {
+    "Ok"
 }
