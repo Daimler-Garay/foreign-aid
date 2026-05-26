@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 // Database config
 #[derive(Clone, Debug)]
 pub struct PostgresOptions {

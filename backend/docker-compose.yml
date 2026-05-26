@@ -9,13 +9,13 @@ services:
       POSTGRES_DB: foreign_aid
 
     ports:
-      - "5433:5433"
+      - "5433:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app_db"]
+      test: ["CMD-SHELL", "pg_isready -U admin  -d foreign_aid"]
       interval: 10s
       timeout: 5s
       retries: 5

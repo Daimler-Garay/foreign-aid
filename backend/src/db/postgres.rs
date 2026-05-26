@@ -1,5 +1,5 @@
 use chrono::Utc;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{AssertSqlSafe, PgPool, postgres::PgPoolOptions};
 
 use crate::db::{DatabaseError, DatabaseOptions};
 
@@ -42,10 +42,8 @@ impl PostgresDatabase {
             options.postgres.set_max_connections(1);
             let db = Self::connect(options).await?;
             let pool = db.pool();
-            sqlx::query(r#"CREATE DATABASE {}"#)
-                .bind(&test_db_name)
-                .execute(pool)
-                .await?;
+            let sql = create_database_sql(&test_db_name);
+            sqlx::query(AssertSqlSafe(sql)).execute(pool).await?;
         }
 
         // Connect to the temp db
@@ -72,11 +70,27 @@ impl PostgresDatabase {
             // Drop temp DB
             let db = Self::connect(self.options.clone()).await?;
             let pool = db.pool();
-            sqlx::query(r#"DROP DATABASE IF EXISTS {} WITH (FORCE)"#)
-                .bind(test_db_to_drop)
-                .execute(pool)
-                .await?;
+            let sql = drop_database_sql(test_db_to_drop);
+            sqlx::query(AssertSqlSafe(sql)).execute(pool).await?;
         }
         Ok(())
     }
+}
+
+fn create_database_sql(database_name: &str) -> String {
+    format!(
+        "CREATE DATABASE {}",
+        quote_postgres_identifier(database_name)
+    )
+}
+
+fn drop_database_sql(database_name: &str) -> String {
+    format!(
+        "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+        quote_postgres_identifier(database_name)
+    )
+}
+
+fn quote_postgres_identifier(identifier: &str) -> String {
+    format!(r#""{}""#, identifier.replace('"', r#""""#))
 }

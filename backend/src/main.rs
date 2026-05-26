@@ -1,7 +1,9 @@
 use axum::{Router, routing::get};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod application;
 mod db;
+mod domain;
 
 #[tokio::main]
 async fn main() {
