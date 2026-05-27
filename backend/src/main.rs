@@ -1,6 +1,7 @@
 use axum::{Router, routing::get};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod api;
 mod application;
 mod db;
 mod domain;

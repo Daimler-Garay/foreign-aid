@@ -16,3 +16,9 @@ pub struct Player {
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
+
+#[derive(Deserialize, Serialize, Debug, Clone, sqlx::FromRow)]
+pub struct CreatePlayer {
+    pub display_name: String,
+    pub active: bool,
+}
