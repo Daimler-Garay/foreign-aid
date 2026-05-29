@@ -5,12 +5,9 @@ use crate::{
     domain::models::players::{CreatePlayer, Player},
 };
 
-pub async fn add_player(
-    player: CreatePlayer,
-    state: &SharedState,
-) -> RepositoryResult<CreatePlayer> {
+pub async fn add_player(player: &CreatePlayer, state: &SharedState) -> RepositoryResult<Player> {
     tracing::trace!("player: {:#?}", player);
-    let player = sqlx::query_as::<_, CreatePlayer>(
+    let player = sqlx::query_as::<_, Player>(
         r#"INSERT into players (
             display_name, active
         ) VALUES ($1, $2) RETURNING id, display_name, active, rating, rating_deviation, volatility, games_played, wins, losses, created_at, updated_at"#
@@ -32,4 +29,13 @@ pub async fn list_players(state: &SharedState) -> RepositoryResult<Vec<Player>> 
         .fetch_all(&state.db_pool)
         .await?;
     Ok(player)
+}
+
+pub async fn delete_player(state: &SharedState, id: Uuid) -> RepositoryResult<bool> {
+    let result = sqlx::query("DELETE FROM players WHERE id = $1")
+        .bind(id)
+        .execute(&state.db_pool)
+        .await?;
+
+    Ok(result.rows_affected() == 1)
 }
