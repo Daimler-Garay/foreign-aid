@@ -27,3 +27,6 @@ rustc-ice-*.txt
 *.db
 *.db-shm
 *.db-wal
+
+# Secrets
+.env
