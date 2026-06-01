@@ -2,7 +2,7 @@ use uuid::Uuid;
 
 use crate::{
     application::{repository::RepositoryResult, state::SharedState},
-    domain::models::matches::{CreateMatchRequest, Match},
+    domain::models::matches::{CreateMatchRequest, Match, MatchDetail, MatchPlayerDetail},
 };
 
 pub async fn create_match(
@@ -35,11 +35,6 @@ pub async fn create_match(
     Ok(match_row)
 }
 
-pub async fn get_match_by_id(id: Uuid, state: &SharedState) -> RepositoryResult<Match> {
-    let query = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.db_pool)
-        .await?;
-
-    Ok(query)
+pub async fn get_match_by_id(id: Uuid, state: &SharedState) -> RepositoryResult<MatchDetail> {
+    todo!()
 }

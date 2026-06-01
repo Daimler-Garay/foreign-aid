@@ -24,6 +24,17 @@ pub async fn get_player_by_id(id: Uuid, state: &SharedState) -> RepositoryResult
     Ok(player)
 }
 
+pub async fn get_player_by_display_name(
+    display_name: &str,
+    state: &SharedState,
+) -> RepositoryResult<Player> {
+    let player = sqlx::query_as::<_, Player>(r#"SELECT * FROM players WHERE display_name = $1"#)
+        .bind(display_name)
+        .fetch_one(&state.db_pool)
+        .await?;
+    Ok(player)
+}
+
 pub async fn list_players(state: &SharedState) -> RepositoryResult<Vec<Player>> {
     let player = sqlx::query_as::<_, Player>(r#"SELECT * FROM players"#)
         .fetch_all(&state.db_pool)
@@ -32,7 +43,7 @@ pub async fn list_players(state: &SharedState) -> RepositoryResult<Vec<Player>> 
 }
 
 pub async fn delete_player(state: &SharedState, id: Uuid) -> RepositoryResult<bool> {
-    let result = sqlx::query("DELETE FROM players WHERE id = $1")
+    let result = sqlx::query(r#"DELETE FROM players WHERE id = $1"#)
         .bind(id)
         .execute(&state.db_pool)
         .await?;

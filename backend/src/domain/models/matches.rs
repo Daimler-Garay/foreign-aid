@@ -1,3 +1,4 @@
+use crate::domain::models::players::Player;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -36,4 +37,16 @@ pub struct CreateMatchRequest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct JoinMatchRequest {
     pub display_name: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct MatchDetail {
+    pub match_detail: Match,
+    pub players: Vec<MatchPlayerDetail>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct MatchPlayerDetail {
+    pub player: Player,
+    pub match_player: MatchPlayer,
 }
