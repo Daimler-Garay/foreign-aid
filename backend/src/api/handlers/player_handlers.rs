@@ -70,7 +70,35 @@ pub async fn get_player_by_id_handler(
         // handle player_id not found
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                let player_error = PlayerError::PlayerNotFound(id);
+                let player_error = PlayerError::PlayerNotFound(PlayerLookup::Id(id));
+                (
+                    player_error.status_code(),
+                    ApiErrorEntry::from(player_error),
+                )
+                    .into()
+            }
+            _ => ApiError::from(e),
+        })?;
+
+    Ok(Json(player))
+}
+
+pub async fn get_player_by_display_name_handler(
+    State(state): State<SharedState>,
+    Path((version, display_name)): Path<(String, String)>,
+) -> Result<Json<Player>, ApiError> {
+    let api_version: ApiVersion = version::parse_version(&version)?;
+
+    tracing::trace!("api version {}", api_version);
+    tracing::trace!("display_name: {}", display_name);
+
+    let player = player_repo::get_player_by_display_name(&display_name, &state)
+        .await
+        //handler display_name not found
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => {
+                let player_error =
+                    PlayerError::PlayerNotFound(PlayerLookup::DisplayName(display_name));
                 (
                     player_error.status_code(),
                     ApiErrorEntry::from(player_error),
@@ -97,10 +125,25 @@ pub async fn delete_player_handler(
     }
 }
 
+#[derive(Debug)]
+enum PlayerLookup {
+    Id(Uuid),
+    DisplayName(String),
+}
+
+impl std::fmt::Display for PlayerLookup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Id(player_id) => write!(f, "id={player_id}"),
+            Self::DisplayName(display_name) => write!(f, "id={display_name}"),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 enum PlayerError {
     #[error("player not found: {0}")]
-    PlayerNotFound(Uuid),
+    PlayerNotFound(PlayerLookup),
     #[error("display_name is not valid")]
     InvalidDisplayName,
     #[error("display_name {0} already exists")]
@@ -120,19 +163,35 @@ impl PlayerError {
 impl From<PlayerError> for ApiErrorEntry {
     fn from(player_error: PlayerError) -> Self {
         let message = player_error.to_string();
+
         match player_error {
-            PlayerError::PlayerNotFound(player_id) => Self::new(&message)
-                .code(ApiErrorCode::PlayerNotFound)
-                .kind(ApiErrorKind::ResourceNotFound)
-                .description(&format!(
-                    "player with the ID '{}' does not exist in our records",
-                    player_id
-                ))
-                .detail(serde_json::json!({"player_id": player_id}))
-                .reason("must be an existing player")
-                .instance(&format!("/api/v1/players/{}", player_id))
-                .trace_id()
-                .help("please check if the player ID is correct"),
+            PlayerError::PlayerNotFound(lookup) => {
+                let base = Self::new(&message)
+                    .code(ApiErrorCode::PlayerNotFound)
+                    .kind(ApiErrorKind::ResourceNotFound)
+                    .reason("must be an existing player")
+                    .trace_id()
+                    .help("please check if the player identifier is correct");
+
+                match lookup {
+                    PlayerLookup::Id(player_id) => base
+                        .description(&format!(
+                            "player with the ID '{}' does not exist in our records",
+                            player_id
+                        ))
+                        .detail(serde_json::json!({ "player_id": player_id }))
+                        .instance(&format!("/api/v1/players/{}", player_id)),
+
+                    PlayerLookup::DisplayName(display_name) => base
+                        .description(&format!(
+                            "player with display_name '{}' does not exist in our records",
+                            display_name
+                        ))
+                        .detail(serde_json::json!({ "display_name": display_name }))
+                        .instance("/api/v1/players"),
+                }
+            }
+
             PlayerError::InvalidDisplayName => Self::new(&message)
                 .code(ApiErrorCode::InvalidDisplayName)
                 .kind(ApiErrorKind::ValidationError)
@@ -140,6 +199,7 @@ impl From<PlayerError> for ApiErrorEntry {
                 .instance("/api/v1/players")
                 .trace_id()
                 .help("please enter a valid display name"),
+
             PlayerError::DuplicateDisplayName(display_name) => Self::new(&message)
                 .code(ApiErrorCode::DuplicateDisplayName)
                 .kind(ApiErrorKind::ValidationError)
@@ -147,7 +207,7 @@ impl From<PlayerError> for ApiErrorEntry {
                     "player with name '{}' already exists!",
                     display_name
                 ))
-                .detail(serde_json::json!({"display_name": display_name}))
+                .detail(serde_json::json!({ "display_name": display_name }))
                 .reason("display name must be unique")
                 .instance("/api/v1/players")
                 .trace_id()

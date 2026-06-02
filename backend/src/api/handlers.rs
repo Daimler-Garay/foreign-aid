@@ -1,2 +1,2 @@
-pub mod match_handlers;
+pub mod matches_handlers;
 pub mod player_handlers;
