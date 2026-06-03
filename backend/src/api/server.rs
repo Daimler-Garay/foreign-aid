@@ -21,7 +21,10 @@ use tokio::{
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::{
-    api::{error::ApiError, routes::player_routes},
+    api::{
+        error::ApiError,
+        routes::{match_routes, player_routes},
+    },
     application::state::SharedState,
 };
 
@@ -38,6 +41,7 @@ pub async fn start(state: SharedState) {
         .route("/{version}/health", get(health_handler))
         .route("/{version}/version", get(version_handler))
         .nest("/{version}/players", player_routes::routes())
+        .nest("/{version}/matches}", match_routes::routes())
         .fallback(error_404_handler)
         .with_state(Arc::clone(&state))
         .layer(cors_layer)
