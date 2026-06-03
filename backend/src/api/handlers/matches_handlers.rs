@@ -44,10 +44,10 @@ pub async fn create_match_handler(
 }
 
 pub async fn get_match_detail_by_id_handler(
+    api_version: ApiVersion,
     State(state): State<SharedState>,
     Path((version, id)): Path<(String, Uuid)>,
 ) -> Result<Json<MatchDetail>, ApiError> {
-    let api_version: ApiVersion = version::parse_version(&version)?;
     tracing::trace!("api version {}", api_version);
     tracing::trace!("match id: {}", id);
     let matches = matches_repo::get_match_detail_by_id(id, &state)
@@ -55,9 +55,13 @@ pub async fn get_match_detail_by_id_handler(
         // handle match_id not found
         .map_err(|e| match e {
             sqlx::Error::RowNotFound => {
-                let match_error = MatchError::
+                let match_error = MatchError::MatchNotFound(id);
+                (match_error.status_code(), ApiErrorEntry::from(match_error)).into()
             }
-        })
+            _ => ApiError::from(e),
+        })?;
+
+    Ok(Json(matches))
 }
 
 #[derive(Debug, Error)]
@@ -65,7 +69,7 @@ enum MatchError {
     #[error("host player not found: {0}")]
     HostNotFound(String),
     #[error("match id not found: {0}")]
-    MatchNotFound(Uuid)
+    MatchNotFound(Uuid),
 }
 
 impl MatchError {
@@ -95,7 +99,14 @@ impl From<MatchError> for ApiErrorEntry {
             MatchError::MatchNotFound(uuid) => Self::new(&message)
                 .code(ApiErrorCode::MatchNotFound)
                 .kind(ApiErrorKind::ResourceNotFound)
-                .description,
+                .reason("must be an existing match")
+                .description(&format!(
+                    "match with ID '{}' does not exist in our records",
+                    uuid
+                ))
+                .instance(&format!("/api/v1/matches/{}", uuid))
+                .trace_id()
+                .help("please check if the match identifier is correct"),
         }
     }
 }
