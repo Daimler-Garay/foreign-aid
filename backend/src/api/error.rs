@@ -24,6 +24,7 @@ impl Display for ApiError {
 #[derive(Debug, Copy, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiErrorCode {
+    MatchNotFound,
     DuplicateDisplayName,
     InvalidDisplayName,
     PlayerNotFound,

@@ -45,8 +45,10 @@ pub struct MatchDetail {
     pub players: Vec<MatchPlayerDetail>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, sqlx::FromRow)]
 pub struct MatchPlayerDetail {
+    #[sqlx(flatten)]
     pub player: Player,
+    #[sqlx(flatten)]
     pub match_player: MatchPlayer,
 }

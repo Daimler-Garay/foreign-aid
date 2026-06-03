@@ -16,7 +16,9 @@ use crate::{
         repository::{matches_repo, player_repo},
         state::SharedState,
     },
-    domain::models::matches::{CreateMatchRequest, JoinMatchRequest, Match, MatchPlayer},
+    domain::models::matches::{
+        CreateMatchRequest, JoinMatchRequest, Match, MatchDetail, MatchPlayer,
+    },
 };
 
 pub async fn create_match_handler(
@@ -41,16 +43,36 @@ pub async fn create_match_handler(
     Ok((StatusCode::CREATED, Json(create_match)))
 }
 
+pub async fn get_match_detail_by_id_handler(
+    State(state): State<SharedState>,
+    Path((version, id)): Path<(String, Uuid)>,
+) -> Result<Json<MatchDetail>, ApiError> {
+    let api_version: ApiVersion = version::parse_version(&version)?;
+    tracing::trace!("api version {}", api_version);
+    tracing::trace!("match id: {}", id);
+    let matches = matches_repo::get_match_detail_by_id(id, &state)
+        .await
+        // handle match_id not found
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => {
+                let match_error = MatchError::
+            }
+        })
+}
+
 #[derive(Debug, Error)]
 enum MatchError {
     #[error("host player not found: {0}")]
     HostNotFound(String),
+    #[error("match id not found: {0}")]
+    MatchNotFound(Uuid)
 }
 
 impl MatchError {
     const fn status_code(&self) -> StatusCode {
         match self {
             Self::HostNotFound(_) => StatusCode::NOT_FOUND,
+            Self::MatchNotFound(_) => StatusCode::NOT_FOUND,
         }
     }
 }
@@ -70,6 +92,10 @@ impl From<MatchError> for ApiErrorEntry {
                 .reason("host player must exist")
                 .trace_id()
                 .help("the host specified doesn't exist"),
+            MatchError::MatchNotFound(uuid) => Self::new(&message)
+                .code(ApiErrorCode::MatchNotFound)
+                .kind(ApiErrorKind::ResourceNotFound)
+                .description,
         }
     }
 }

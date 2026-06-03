@@ -35,6 +35,50 @@ pub async fn create_match(
     Ok(match_row)
 }
 
-pub async fn get_match_by_id(id: Uuid, state: &SharedState) -> RepositoryResult<MatchDetail> {
-    todo!()
+pub async fn get_match_detail_by_id(
+    id: Uuid,
+    state: &SharedState,
+) -> RepositoryResult<MatchDetail> {
+    let match_detail = sqlx::query_as::<_, Match>(r#"SELECT * FROM matches WHERE id = $1"#)
+        .bind(id)
+        .fetch_one(&state.db_pool)
+        .await?;
+
+    let players = sqlx::query_as::<_, MatchPlayerDetail>(
+        r#"SELECT
+            p.id,
+            p.display_name,
+            p.active,
+            p.rating,
+            p.rating_deviation,
+            p.volatility,
+            p.games_played,
+            p.wins,
+            p.losses,
+            p.created_at,
+            p.updated_at,
+
+            mp.match_id,
+            mp.player_id,
+            mp.placement,
+            mp.joined_at,
+            mp.eliminated_at,
+            mp.old_rating,
+            mp.old_rating_deviation,
+            mp.new_rating,
+            mp.new_rating_deviation,
+            mp.rating_delta
+        FROM match_players mp
+        JOIN players p ON p.id = mp.player_id
+        WHERE mp.match_id = $1
+        ORDER BY mp.joined_at ASC"#,
+    )
+    .bind(id)
+    .fetch_all(&state.db_pool)
+    .await?;
+
+    Ok(MatchDetail {
+        match_detail,
+        players,
+    })
 }

@@ -13,8 +13,8 @@ pub struct Player {
     pub games_played: i32,
     pub wins: i32,
     pub losses: i32,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, sqlx::FromRow)]
