@@ -1,86 +1,77 @@
-use crate::domain::models::players::Player;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Deserialize, Serialize, Debug, Clone, sqlx::FromRow)]
-pub struct Match {
-    pub id: Uuid,
-    pub host_player_id: Uuid,
-    pub status: String,
-    pub notes: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchStatus {
+    Pending,
+    Confirmed,
+    Voided,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
+impl MatchStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Confirmed => "confirmed",
+            Self::Voided => "voided",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, sqlx::FromRow)]
+pub struct MatchResult {
+    pub id: Uuid,
+    pub played_at: DateTime<Utc>,
+    pub submitted_by_user_id: Option<Uuid>,
+    pub status: String,
+    pub notes: Option<String>,
+    pub rating_algorithm: String,
+    pub rating_algorithm_version: i32,
+    pub corrected_from_match_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, sqlx::FromRow)]
 pub struct MatchPlayer {
     pub match_id: Uuid,
     pub player_id: Uuid,
-    pub placement: Option<i32>,
-    pub joined_at: DateTime<Utc>,
-    pub eliminated_at: Option<DateTime<Utc>>,
-    pub old_rating: Option<f64>,
-    pub old_rating_deviation: Option<f64>,
-    pub new_rating: Option<f64>,
-    pub new_rating_deviation: Option<f64>,
-    pub rating_delta: Option<f64>,
+    pub placement: i32,
+    pub old_rating: f64,
+    pub old_uncertainty: f64,
+    pub new_rating: f64,
+    pub new_uncertainty: f64,
+    pub rating_delta: f64,
+    pub created_at: DateTime<Utc>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CreateMatchRequest {
-    pub display_name: String,
+    pub played_at: DateTime<Utc>,
     pub notes: Option<String>,
+    pub placements: Vec<PlacementRequest>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct JoinMatchRequest {
-    pub display_name: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct MatchDetail {
-    pub match_detail: Match,
-    pub players: Vec<MatchPlayerDetail>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, sqlx::FromRow)]
-pub struct MatchPlayerDetail {
-    #[sqlx(flatten)]
-    pub player: Player,
-    #[sqlx(flatten)]
-    pub match_player: MatchPlayer,
-}
-
-// the reason for this is the flatten macro can't resolve conflicting column names
-// the idea is to use this and bypass it via aliases
-#[derive(Debug, sqlx::FromRow)]
-pub struct MatchHistoryRow {
-    pub match_id: Uuid,
-    pub host_player_id: Uuid,
-    pub status: String,
-    pub notes: Option<String>,
-    pub match_created_at: DateTime<Utc>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PlacementRequest {
     pub player_id: Uuid,
-    pub display_name: String,
-    pub active: bool,
-    pub rating: f64,
-    pub rating_deviation: f64,
-    pub volatility: f64,
-    pub games_played: i32,
-    pub wins: i32,
-    pub losses: i32,
-    pub player_created_at: DateTime<Utc>,
-    pub player_updated_at: DateTime<Utc>,
-    pub placement: Option<i32>,
-    pub joined_at: DateTime<Utc>,
-    pub eliminated_at: Option<DateTime<Utc>>,
-    pub old_rating: Option<f64>,
-    pub old_rating_deviation: Option<f64>,
-    pub new_rating: Option<f64>,
-    pub new_rating_deviation: Option<f64>,
-    pub rating_delta: Option<f64>,
+    pub placement: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MatchSubmissionResponse {
+    pub match_id: Uuid,
+    pub status: String,
+    pub rating_changes: Vec<RatingChangeResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RatingChangeResponse {
+    pub player_id: Uuid,
+    pub placement: i32,
+    pub old_display_rating: i32,
+    pub new_display_rating: i32,
+    pub display_delta: i32,
 }

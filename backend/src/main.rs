@@ -1,10 +1,6 @@
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::application::app;
-
-mod api;
-mod application;
-mod db;
+use backend::application::app;
 
 #[tokio::main]
 async fn main() {
