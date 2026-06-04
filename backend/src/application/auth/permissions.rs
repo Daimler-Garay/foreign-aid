@@ -232,4 +232,59 @@ mod tests {
             .await
             .expect("should drop temporary test database");
     }
+
+    #[tokio::test]
+    async fn admin_extractor_rejects_player_for_replay_void_and_correction_paths() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let pool = db.pool();
+        let user_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        user_repo::insert_user(pool, user_id, "player", "hash", UserRole::Player)
+            .await
+            .expect("user should insert");
+        session_repo::insert_session(
+            pool,
+            session_id,
+            user_id,
+            crate::application::auth::session::session_expires_at(),
+        )
+        .await
+        .expect("session should insert");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: pool.clone(),
+        });
+
+        for uri in [
+            "/api/admin/recalculate-ratings",
+            "/api/matches/00000000-0000-0000-0000-000000000001/void",
+            "/api/matches/00000000-0000-0000-0000-000000000001/correct",
+        ] {
+            let request = Request::builder()
+                .uri(uri)
+                .header(
+                    axum::http::header::COOKIE,
+                    format!(
+                        "{}={session_id}",
+                        crate::application::auth::session::SESSION_COOKIE_NAME
+                    ),
+                )
+                .body(Body::empty())
+                .expect("request should build");
+            let (mut parts, _) = request.into_parts();
+
+            let error = match AdminUser::from_request_parts(&mut parts, &state).await {
+                Ok(_) => panic!("player request should fail for {uri}"),
+                Err(error) => error,
+            };
+
+            assert_eq!(error.status, StatusCode::FORBIDDEN.as_u16());
+        }
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
 }

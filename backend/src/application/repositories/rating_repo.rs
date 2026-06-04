@@ -49,6 +49,63 @@ where
     .await
 }
 
+pub async fn load_player_ratings_for_update<'e, E>(
+    executor: E,
+    player_ids: &[Uuid],
+) -> RepositoryResult<Vec<PlayerRating>>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, PlayerRating>(
+        r#"
+        SELECT
+            player_id,
+            rating,
+            uncertainty,
+            games_played,
+            wins,
+            losses,
+            total_placement,
+            last_played_at,
+            updated_at
+        FROM player_ratings
+        WHERE player_id = ANY($1)
+        FOR UPDATE
+        "#,
+    )
+    .bind(player_ids)
+    .fetch_all(executor)
+    .await
+}
+
+pub async fn reset_all_player_ratings<'e, E>(
+    executor: E,
+    default_rating: f64,
+    default_uncertainty: f64,
+) -> RepositoryResult<()>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        UPDATE player_ratings
+        SET rating = $1,
+            uncertainty = $2,
+            games_played = 0,
+            wins = 0,
+            losses = 0,
+            total_placement = 0,
+            last_played_at = NULL
+        "#,
+    )
+    .bind(default_rating)
+    .bind(default_uncertainty)
+    .execute(executor)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn update_player_rating_after_match<'e, E>(
     executor: E,
     player_id: Uuid,

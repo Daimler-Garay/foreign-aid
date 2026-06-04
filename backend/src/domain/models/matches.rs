@@ -132,3 +132,16 @@ pub struct MatchParticipantResponse {
     pub new_display_rating: i32,
     pub display_delta: i32,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VoidMatchResponse {
+    pub match_id: Uuid,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CorrectMatchResponse {
+    pub original_match_id: Uuid,
+    pub corrected_match_id: Uuid,
+    pub status: String,
+}

@@ -146,6 +146,7 @@ pub async fn submit_match(
             notes: request.notes.clone(),
             rating_algorithm: RATING_ALGORITHM.to_owned(),
             rating_algorithm_version: RATING_ALGORITHM_VERSION,
+            corrected_from_match_id: None,
         },
     )
     .await?;

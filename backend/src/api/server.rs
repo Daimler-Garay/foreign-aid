@@ -18,7 +18,7 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use crate::{
     api::{
         error::ApiError,
-        routes::{auth_routes, leaderboard_routes, match_routes, player_routes},
+        routes::{admin_routes, auth_routes, leaderboard_routes, match_routes, player_routes},
     },
     application::state::SharedState,
 };
@@ -48,6 +48,7 @@ pub fn router(state: SharedState) -> Router {
         .nest("/api/players", player_routes::routes())
         .nest("/api/matches", match_routes::routes())
         .nest("/api/leaderboard", leaderboard_routes::routes())
+        .nest("/api/admin", admin_routes::routes())
         .fallback(error_404_handler)
         .with_state(state)
         .layer(CorsLayer::permissive())

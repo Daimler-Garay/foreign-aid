@@ -15,6 +15,7 @@ pub struct NewMatch {
     pub notes: Option<String>,
     pub rating_algorithm: String,
     pub rating_algorithm_version: i32,
+    pub corrected_from_match_id: Option<Uuid>,
 }
 
 pub struct NewMatchPlayer {
@@ -44,9 +45,10 @@ where
             status,
             notes,
             rating_algorithm,
-            rating_algorithm_version
+            rating_algorithm_version,
+            corrected_from_match_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id, played_at, submitted_by_user_id, status, notes,
                   rating_algorithm, rating_algorithm_version,
                   corrected_from_match_id, created_at, updated_at
@@ -59,6 +61,7 @@ where
     .bind(new_match.notes)
     .bind(new_match.rating_algorithm)
     .bind(new_match.rating_algorithm_version)
+    .bind(new_match.corrected_from_match_id)
     .fetch_one(executor)
     .await
 }
@@ -131,6 +134,28 @@ pub async fn find_match_by_id(
     .await
 }
 
+pub async fn find_match_by_id_for_update<'e, E>(
+    executor: E,
+    match_id: Uuid,
+) -> RepositoryResult<Option<MatchResult>>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, MatchResult>(
+        r#"
+        SELECT id, played_at, submitted_by_user_id, status, notes,
+               rating_algorithm, rating_algorithm_version,
+               corrected_from_match_id, created_at, updated_at
+        FROM matches
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(match_id)
+    .fetch_optional(executor)
+    .await
+}
+
 pub async fn list_match_participants(
     pool: &DatabasePool,
     match_id: Uuid,
@@ -155,6 +180,113 @@ pub async fn list_match_participants(
     )
     .bind(match_id)
     .fetch_all(pool)
+    .await
+}
+
+pub async fn list_confirmed_matches_for_replay<'e, E>(
+    executor: E,
+) -> RepositoryResult<Vec<MatchResult>>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, MatchResult>(
+        r#"
+        SELECT id, played_at, submitted_by_user_id, status, notes,
+               rating_algorithm, rating_algorithm_version,
+               corrected_from_match_id, created_at, updated_at
+        FROM matches
+        WHERE status = 'confirmed'
+        ORDER BY played_at ASC, created_at ASC, id ASC
+        "#,
+    )
+    .fetch_all(executor)
+    .await
+}
+
+pub async fn list_match_participants_for_update<'e, E>(
+    executor: E,
+    match_id: Uuid,
+) -> RepositoryResult<Vec<MatchParticipantRow>>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, MatchParticipantRow>(
+        r#"
+        SELECT
+            mp.match_id,
+            mp.player_id,
+            p.display_name,
+            mp.placement,
+            mp.old_rating,
+            mp.old_uncertainty,
+            mp.new_rating,
+            mp.new_uncertainty,
+            mp.rating_delta
+        FROM match_players mp
+        JOIN players p ON p.id = mp.player_id
+        WHERE mp.match_id = $1
+        ORDER BY mp.placement ASC, p.display_name ASC, mp.player_id ASC
+        FOR UPDATE OF mp
+        "#,
+    )
+    .bind(match_id)
+    .fetch_all(executor)
+    .await
+}
+
+pub async fn update_match_player_snapshot<'e, E>(
+    executor: E,
+    participant: NewMatchPlayer,
+) -> RepositoryResult<MatchPlayer>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, MatchPlayer>(
+        r#"
+        UPDATE match_players
+        SET old_rating = $3,
+            old_uncertainty = $4,
+            new_rating = $5,
+            new_uncertainty = $6,
+            rating_delta = $7
+        WHERE match_id = $1
+          AND player_id = $2
+        RETURNING match_id, player_id, placement, old_rating, old_uncertainty,
+                  new_rating, new_uncertainty, rating_delta, created_at
+        "#,
+    )
+    .bind(participant.match_id)
+    .bind(participant.player_id)
+    .bind(participant.old_rating)
+    .bind(participant.old_uncertainty)
+    .bind(participant.new_rating)
+    .bind(participant.new_uncertainty)
+    .bind(participant.rating_delta)
+    .fetch_one(executor)
+    .await
+}
+
+pub async fn set_match_status<'e, E>(
+    executor: E,
+    match_id: Uuid,
+    status: MatchStatus,
+) -> RepositoryResult<Option<MatchResult>>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, MatchResult>(
+        r#"
+        UPDATE matches
+        SET status = $2
+        WHERE id = $1
+        RETURNING id, played_at, submitted_by_user_id, status, notes,
+                  rating_algorithm, rating_algorithm_version,
+                  corrected_from_match_id, created_at, updated_at
+        "#,
+    )
+    .bind(match_id)
+    .bind(status.as_str())
+    .fetch_optional(executor)
     .await
 }
 
@@ -210,6 +342,7 @@ mod tests {
                 notes: Some("test".to_owned()),
                 rating_algorithm: "weng_lin".to_owned(),
                 rating_algorithm_version: 1,
+                corrected_from_match_id: None,
             },
         )
         .await
@@ -266,6 +399,7 @@ mod tests {
                     notes: None,
                     rating_algorithm: "weng_lin".to_owned(),
                     rating_algorithm_version: 1,
+                    corrected_from_match_id: None,
                 },
             )
             .await

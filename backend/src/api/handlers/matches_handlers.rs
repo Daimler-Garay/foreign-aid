@@ -8,7 +8,11 @@ use uuid::Uuid;
 
 use crate::{
     api::error::ApiError,
-    application::{auth::permissions::AdminUser, services::match_service, state::SharedState},
+    application::{
+        auth::permissions::AdminUser,
+        services::{match_service, replay_service},
+        state::SharedState,
+    },
     domain::models::matches::CreateMatchRequest,
 };
 
@@ -37,6 +41,28 @@ pub async fn get_match_handler(
     let response = match_service::get_match(&state, match_id).await?;
 
     Ok(Json(response))
+}
+
+pub async fn void_match_handler(
+    State(state): State<SharedState>,
+    admin: AdminUser,
+    Path(match_id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let response = replay_service::void_match(&state, &admin.into_inner(), match_id).await?;
+
+    Ok(Json(response))
+}
+
+pub async fn correct_match_handler(
+    State(state): State<SharedState>,
+    admin: AdminUser,
+    Path(match_id): Path<Uuid>,
+    Json(request): Json<CreateMatchRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let response =
+        replay_service::correct_match(&state, &admin.into_inner(), match_id, request).await?;
+
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 #[cfg(test)]
@@ -276,6 +302,88 @@ mod tests {
         assert_eq!(value["participants"].as_array().unwrap().len(), 2);
         assert_eq!(value["participants"][0]["placement"], 1);
         assert!(value["participants"][0]["display_delta"].is_i64());
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn admin_can_void_match() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let admin = admin_user(db.pool()).await;
+        let alice = player(db.pool(), "Alice").await;
+        let ben = player(db.pool(), "Ben").await;
+        let submitted = crate::application::services::match_service::submit_match(
+            &state,
+            &admin,
+            request(&[alice, ben]),
+        )
+        .await
+        .expect("match should submit");
+
+        let response = void_match_handler(State(state), AdminUser(admin), Path(submitted.match_id))
+            .await
+            .expect("match should void")
+            .into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("body should be json");
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["status"], "voided");
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn admin_can_correct_match() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let admin = admin_user(db.pool()).await;
+        let alice = player(db.pool(), "Alice").await;
+        let ben = player(db.pool(), "Ben").await;
+        let submitted = crate::application::services::match_service::submit_match(
+            &state,
+            &admin,
+            request(&[alice, ben]),
+        )
+        .await
+        .expect("match should submit");
+
+        let response = correct_match_handler(
+            State(state),
+            AdminUser(admin),
+            Path(submitted.match_id),
+            Json(request(&[ben, alice])),
+        )
+        .await
+        .expect("match should correct")
+        .into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("body should be json");
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(value["original_match_id"], submitted.match_id.to_string());
+        assert_eq!(value["status"], "confirmed");
 
         db.drop()
             .await

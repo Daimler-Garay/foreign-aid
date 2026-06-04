@@ -35,3 +35,9 @@ pub struct RatingRecalculationRun {
 pub struct RecalculateRatingsRequest {
     pub reason: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecalculateRatingsResponse {
+    pub run_id: Uuid,
+    pub status: String,
+}
