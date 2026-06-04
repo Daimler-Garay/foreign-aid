@@ -10,14 +10,14 @@ use thiserror::Error;
 use crate::{
     api::{
         error::{ApiError, ApiErrorCode, ApiErrorEntry, ApiErrorKind},
-        version::{self, ApiVersion},
+        version::ApiVersion,
     },
     application::{
         repository::{matches_repo, player_repo},
         state::SharedState,
     },
     domain::models::matches::{
-        CreateMatchRequest, JoinMatchRequest, Match, MatchDetail, MatchPlayer,
+        CreateMatchRequest, JoinMatchRequest, Match, MatchDetail, MatchPlayer, MatchPlayerDetail,
     },
 };
 
@@ -46,7 +46,7 @@ pub async fn create_match_handler(
 pub async fn get_match_detail_by_id_handler(
     api_version: ApiVersion,
     State(state): State<SharedState>,
-    Path((version, id)): Path<(String, Uuid)>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<MatchDetail>, ApiError> {
     tracing::trace!("api version {}", api_version);
     tracing::trace!("match id: {}", id);
@@ -62,6 +62,15 @@ pub async fn get_match_detail_by_id_handler(
         })?;
 
     Ok(Json(matches))
+}
+
+pub async fn get_match_history_handler(
+    api_version: ApiVersion,
+    State(state): State<SharedState>,
+) -> Result<Json<Vec<MatchDetail>>, ApiError> {
+    tracing::trace!("api version: {}", api_version);
+    let history = matches_repo::get_match_history(&state).await?;
+    Ok(Json(history))
 }
 
 #[derive(Debug, Error)]
