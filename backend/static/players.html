@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Players</title><link rel="stylesheet" href="/app.css"></head>
+  <body data-page="players">
+    <header class="topbar"><div class="brand">Coup Leaderboard</div><nav class="nav"><a href="/leaderboard">Leaderboard</a><a href="/players">Players</a><a href="/matches">Matches</a><a href="/matches/new">Submit</a><a href="/admin/audit-log">Audit</a></nav></header>
+    <main class="main stack">
+      <div class="heading-row"><h1>Players</h1><button id="logout" class="secondary">Log Out</button></div>
+      <section class="grid">
+        <form id="create-player-form" class="panel stack"><h2>Create Player</h2><label>Display name <input name="display_name" required></label><button type="submit">Create</button><div id="create-status" class="status"></div></form>
+        <section class="panel stack"><h2>Players</h2><div class="actions"><label><span>Include inactive</span><input id="include-inactive" type="checkbox"></label><button id="refresh">Refresh</button></div><div id="status" class="status"></div><div id="players"></div></section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

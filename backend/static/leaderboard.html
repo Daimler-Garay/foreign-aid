@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Leaderboard</title><link rel="stylesheet" href="/app.css"></head>
+  <body data-page="leaderboard">
+    <header class="topbar"><div class="brand">Coup Leaderboard</div><nav class="nav"><a href="/leaderboard">Leaderboard</a><a href="/players">Players</a><a href="/matches">Matches</a><a href="/matches/new">Submit</a><a href="/admin/audit-log">Audit</a></nav></header>
+    <main class="main">
+      <div class="heading-row"><h1>Leaderboard</h1><button id="logout" class="secondary">Log Out</button></div>
+      <section class="panel stack">
+        <div class="actions"><label>Minimum games <input id="min-games" type="number" min="0" value="3"></label><label><span>Include inactive</span><input id="include-inactive" type="checkbox"></label><button id="refresh">Refresh</button></div>
+        <div id="status" class="status" role="status"></div>
+        <div id="leaderboard"></div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

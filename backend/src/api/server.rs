@@ -19,6 +19,7 @@ use crate::{
     api::{
         error::ApiError,
         routes::{admin_routes, auth_routes, leaderboard_routes, match_routes, player_routes},
+        ui,
     },
     application::state::SharedState,
 };
@@ -42,6 +43,16 @@ pub async fn start(state: SharedState) -> Result<(), ServerError> {
 
 pub fn router(state: SharedState) -> Router {
     Router::new()
+        .route("/", get(ui::index))
+        .route("/login", get(ui::login_page))
+        .route("/leaderboard", get(ui::leaderboard_page))
+        .route("/players", get(ui::players_page))
+        .route("/matches", get(ui::matches_page))
+        .route("/matches/{id}", get(ui::match_detail_page))
+        .route("/matches/new", get(ui::submit_match_page))
+        .route("/admin/audit-log", get(ui::audit_log_page))
+        .route("/app.css", get(ui::app_css))
+        .route("/app.js", get(ui::app_js))
         .route("/healthz", get(healthz_handler))
         .route("/readyz", get(readyz_handler))
         .nest("/api/auth", auth_routes::routes())
