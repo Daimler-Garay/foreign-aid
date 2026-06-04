@@ -1,9 +1,7 @@
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
-use crate::{
-    application::repositories::RepositoryResult, db::DatabasePool,
-    domain::models::audit::AuditLogEntry,
-};
+use crate::{application::repositories::RepositoryResult, domain::models::audit::AuditLogEntry};
 
 #[derive(Debug, Clone)]
 pub struct NewAuditLogEntry {
@@ -16,10 +14,13 @@ pub struct NewAuditLogEntry {
     pub new_value: Option<serde_json::Value>,
 }
 
-pub async fn insert_audit_log_entry(
-    pool: &DatabasePool,
+pub async fn insert_audit_log_entry<'e, E>(
+    executor: E,
     entry: NewAuditLogEntry,
-) -> RepositoryResult<AuditLogEntry> {
+) -> RepositoryResult<AuditLogEntry>
+where
+    E: Executor<'e, Database = Postgres>,
+{
     sqlx::query_as::<_, AuditLogEntry>(
         r#"
         INSERT INTO audit_log (
@@ -43,7 +44,7 @@ pub async fn insert_audit_log_entry(
     .bind(entry.entity_id)
     .bind(entry.old_value)
     .bind(entry.new_value)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
 }
 

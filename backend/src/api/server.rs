@@ -16,7 +16,10 @@ use tokio::{
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use crate::{
-    api::{error::ApiError, routes::auth_routes},
+    api::{
+        error::ApiError,
+        routes::{auth_routes, player_routes},
+    },
     application::state::SharedState,
 };
 
@@ -42,6 +45,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/healthz", get(healthz_handler))
         .route("/readyz", get(readyz_handler))
         .nest("/api/auth", auth_routes::routes())
+        .nest("/api/players", player_routes::routes())
         .fallback(error_404_handler)
         .with_state(state)
         .layer(CorsLayer::permissive())

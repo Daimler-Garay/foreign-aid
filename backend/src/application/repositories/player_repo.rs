@@ -1,3 +1,4 @@
+use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
 use crate::{
@@ -6,12 +7,15 @@ use crate::{
     domain::models::players::{Player, PlayerRating, PlayerWithRating},
 };
 
-pub async fn insert_player(
-    pool: &DatabasePool,
+pub async fn insert_player<'e, E>(
+    executor: E,
     id: Uuid,
     display_name: &str,
     user_id: Option<Uuid>,
-) -> RepositoryResult<Player> {
+) -> RepositoryResult<Player>
+where
+    E: Executor<'e, Database = Postgres>,
+{
     sqlx::query_as::<_, Player>(
         r#"
         INSERT INTO players (id, user_id, display_name)
@@ -22,14 +26,17 @@ pub async fn insert_player(
     .bind(id)
     .bind(user_id)
     .bind(display_name)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
 }
 
-pub async fn insert_default_rating(
-    pool: &DatabasePool,
+pub async fn insert_default_rating<'e, E>(
+    executor: E,
     player_id: Uuid,
-) -> RepositoryResult<PlayerRating> {
+) -> RepositoryResult<PlayerRating>
+where
+    E: Executor<'e, Database = Postgres>,
+{
     sqlx::query_as::<_, PlayerRating>(
         r#"
         INSERT INTO player_ratings (player_id)
@@ -39,7 +46,7 @@ pub async fn insert_default_rating(
         "#,
     )
     .bind(player_id)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
 }
 

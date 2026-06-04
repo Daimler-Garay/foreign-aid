@@ -1,217 +1,94 @@
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
-use sqlx::types::Uuid;
-use thiserror::Error;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::{
-    api::{
-        error::{ApiError, ApiErrorCode, ApiErrorEntry, ApiErrorKind},
-        version::{self, ApiVersion},
-    },
-    application::{repository::player_repo, state::SharedState},
-    domain::models::players::{CreatePlayer, Player},
+    api::error::ApiError,
+    application::{auth::permissions::AdminUser, services::player_service, state::SharedState},
+    domain::models::players::CreatePlayerRequest,
 };
 
-pub async fn add_player_handler(
-    api_version: ApiVersion,
+pub async fn create_player_handler(
     State(state): State<SharedState>,
-    Json(player): Json<CreatePlayer>,
+    admin: AdminUser,
+    Json(request): Json<CreatePlayerRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
+    let player = player_service::create_player(&state, &admin.into_inner(), request).await?;
 
-    // guard against blank display_name
-    if player.display_name.trim().is_empty() {
-        let player_error = PlayerError::InvalidDisplayName;
-        return Err((
-            player_error.status_code(),
-            ApiErrorEntry::from(player_error),
-        )
-            .into());
-    }
-    let player = player_repo::add_player(&player, &state)
-        .await
-        // display_name should be unique
-        .map_err(|e| match e {
-            sqlx::Error::Database(ref e) if e.kind() == sqlx::error::ErrorKind::UniqueViolation => {
-                let player_error = PlayerError::DuplicateDisplayName(player.display_name);
-                (
-                    player_error.status_code(),
-                    ApiErrorEntry::from(player_error),
-                )
-                    .into()
-            }
-            _ => ApiError::from(e),
-        })?;
     Ok((StatusCode::CREATED, Json(player)))
 }
 
-pub async fn list_player_handler(
-    api_version: ApiVersion,
-    State(state): State<SharedState>,
-) -> Result<Json<Vec<Player>>, ApiError> {
-    tracing::trace!("api version {}", api_version);
-    let players = player_repo::list_players(&state).await?;
-    Ok(Json(players))
-}
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
 
-pub async fn get_player_by_id_handler(
-    State(state): State<SharedState>,
-    Path((version, id)): Path<(String, Uuid)>,
-) -> Result<Json<Player>, ApiError> {
-    let api_version: ApiVersion = version::parse_version(&version)?;
-    tracing::trace!("api version {}", api_version);
-    tracing::trace!("id: {}", id);
-    let player = player_repo::get_player_by_id(id, &state)
+    use axum::{Json, extract::State, response::IntoResponse};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::{
+        application::{config::Config, repositories::user_repo, state::AppState},
+        db::{Database, DatabaseOptions, options::PostgresOptions},
+        domain::models::auth::{AuthenticatedUser, UserRole},
+    };
+
+    fn test_options() -> DatabaseOptions {
+        DatabaseOptions {
+            postgres: PostgresOptions {
+                database_url: None,
+                db: "foreign_aid".to_string(),
+                host: "localhost".to_string(),
+                port: 5433,
+                user: "admin".to_string(),
+                password: "admin".to_string(),
+                max_connections: 5,
+            },
+        }
+    }
+
+    fn test_config() -> Config {
+        Config {
+            app_env: "test".to_owned(),
+            app_host: "127.0.0.1".to_owned(),
+            app_port: 0,
+            database: test_options().postgres,
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_can_create_player() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let user_id = Uuid::new_v4();
+        user_repo::insert_user(db.pool(), user_id, "admin", "hash", UserRole::Admin)
+            .await
+            .expect("admin should insert");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+
+        let response = create_player_handler(
+            State(state),
+            AdminUser(AuthenticatedUser {
+                id: user_id,
+                username: "admin".to_owned(),
+                role: "admin".to_owned(),
+                active: true,
+                player_id: None,
+                session_id: Uuid::new_v4(),
+            }),
+            Json(CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            }),
+        )
         .await
-        // handle player_id not found
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                let player_error = PlayerError::PlayerNotFound(PlayerLookup::Id(id));
-                (
-                    player_error.status_code(),
-                    ApiErrorEntry::from(player_error),
-                )
-                    .into()
-            }
-            _ => ApiError::from(e),
-        })?;
+        .expect("player should create")
+        .into_response();
 
-    Ok(Json(player))
-}
+        assert_eq!(response.status(), StatusCode::CREATED);
 
-pub async fn get_player_by_display_name_handler(
-    State(state): State<SharedState>,
-    Path((version, display_name)): Path<(String, String)>,
-) -> Result<Json<Player>, ApiError> {
-    let api_version: ApiVersion = version::parse_version(&version)?;
-
-    tracing::trace!("api version {}", api_version);
-    tracing::trace!("display_name: {}", display_name);
-
-    let player = player_repo::get_player_by_display_name(&display_name, &state)
-        .await
-        //handler display_name not found
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                let player_error =
-                    PlayerError::PlayerNotFound(PlayerLookup::DisplayName(display_name));
-                (
-                    player_error.status_code(),
-                    ApiErrorEntry::from(player_error),
-                )
-                    .into()
-            }
-            _ => ApiError::from(e),
-        })?;
-
-    Ok(Json(player))
-}
-
-pub async fn delete_player_handler(
-    Path((version, id)): Path<(String, Uuid)>,
-    State(state): State<SharedState>,
-) -> Result<impl IntoResponse, ApiError> {
-    let api_version: ApiVersion = version::parse_version(&version)?;
-    tracing::trace!("api version: {}", api_version);
-    tracing::trace!("id: {}", id);
-    if player_repo::delete_player(&state, id).await? {
-        Ok(StatusCode::OK)
-    } else {
-        Err(StatusCode::NOT_FOUND)?
-    }
-}
-
-#[derive(Debug)]
-enum PlayerLookup {
-    Id(Uuid),
-    DisplayName(String),
-}
-
-impl std::fmt::Display for PlayerLookup {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Id(player_id) => write!(f, "id={player_id}"),
-            Self::DisplayName(display_name) => write!(f, "id={display_name}"),
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-enum PlayerError {
-    #[error("player not found: {0}")]
-    PlayerNotFound(PlayerLookup),
-    #[error("display_name is not valid")]
-    InvalidDisplayName,
-    #[error("display_name {0} already exists")]
-    DuplicateDisplayName(String),
-}
-
-impl PlayerError {
-    const fn status_code(&self) -> StatusCode {
-        match self {
-            Self::PlayerNotFound(_) => StatusCode::NOT_FOUND,
-            Self::InvalidDisplayName => StatusCode::BAD_REQUEST,
-            Self::DuplicateDisplayName(_) => StatusCode::CONFLICT,
-        }
-    }
-}
-
-impl From<PlayerError> for ApiErrorEntry {
-    fn from(player_error: PlayerError) -> Self {
-        let message = player_error.to_string();
-
-        match player_error {
-            PlayerError::PlayerNotFound(lookup) => {
-                let base = Self::new(&message)
-                    .code(ApiErrorCode::PlayerNotFound)
-                    .kind(ApiErrorKind::ResourceNotFound)
-                    .reason("must be an existing player")
-                    .trace_id()
-                    .help("please check if the player identifier is correct");
-
-                match lookup {
-                    PlayerLookup::Id(player_id) => base
-                        .description(&format!(
-                            "player with the ID '{}' does not exist in our records",
-                            player_id
-                        ))
-                        .detail(serde_json::json!({ "player_id": player_id }))
-                        .instance(&format!("/api/v1/players/{}", player_id)),
-
-                    PlayerLookup::DisplayName(display_name) => base
-                        .description(&format!(
-                            "player with display_name '{}' does not exist in our records",
-                            display_name
-                        ))
-                        .detail(serde_json::json!({ "display_name": display_name }))
-                        .instance("/api/v1/players"),
-                }
-            }
-
-            PlayerError::InvalidDisplayName => Self::new(&message)
-                .code(ApiErrorCode::InvalidDisplayName)
-                .kind(ApiErrorKind::ValidationError)
-                .description("player display_name cannot be blank")
-                .instance("/api/v1/players")
-                .trace_id()
-                .help("please enter a valid display name"),
-
-            PlayerError::DuplicateDisplayName(display_name) => Self::new(&message)
-                .code(ApiErrorCode::DuplicateDisplayName)
-                .kind(ApiErrorKind::ValidationError)
-                .description(&format!(
-                    "player with name '{}' already exists!",
-                    display_name
-                ))
-                .detail(serde_json::json!({ "display_name": display_name }))
-                .reason("display name must be unique")
-                .instance("/api/v1/players")
-                .trace_id()
-                .help("please enter a unique display name"),
-        }
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
     }
 }
