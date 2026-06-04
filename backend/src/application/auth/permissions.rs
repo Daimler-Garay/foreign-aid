@@ -259,6 +259,7 @@ mod tests {
 
         for uri in [
             "/api/admin/recalculate-ratings",
+            "/api/admin/audit-log",
             "/api/matches/00000000-0000-0000-0000-000000000001/void",
             "/api/matches/00000000-0000-0000-0000-000000000001/correct",
         ] {

@@ -1,7 +1,10 @@
 use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
-use crate::{application::repositories::RepositoryResult, domain::models::audit::AuditLogEntry};
+use crate::{
+    application::repositories::RepositoryResult, db::DatabasePool,
+    domain::models::audit::AuditLogEntry,
+};
 
 #[derive(Debug, Clone)]
 pub struct NewAuditLogEntry {
@@ -45,6 +48,24 @@ where
     .bind(entry.old_value)
     .bind(entry.new_value)
     .fetch_one(executor)
+    .await
+}
+
+pub async fn list_audit_log_entries(
+    pool: &DatabasePool,
+    limit: i64,
+) -> RepositoryResult<Vec<AuditLogEntry>> {
+    sqlx::query_as::<_, AuditLogEntry>(
+        r#"
+        SELECT id, actor_user_id, action, entity_type, entity_id,
+               old_value, new_value, created_at
+        FROM audit_log
+        ORDER BY created_at DESC, id DESC
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
     .await
 }
 

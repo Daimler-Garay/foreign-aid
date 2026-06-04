@@ -18,3 +18,15 @@ pub struct AuditLogEntry {
 pub struct AuditLogQuery {
     pub limit: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AuditLogResponse {
+    pub id: Uuid,
+    pub actor_user_id: Option<Uuid>,
+    pub action: String,
+    pub entity_type: String,
+    pub entity_id: Option<Uuid>,
+    pub old_value: Option<serde_json::Value>,
+    pub new_value: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}

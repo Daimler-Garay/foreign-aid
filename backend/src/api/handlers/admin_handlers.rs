@@ -1,9 +1,18 @@
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::{Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 
 use crate::{
     api::error::ApiError,
-    application::{auth::permissions::AdminUser, services::replay_service, state::SharedState},
-    domain::models::recalculation::RecalculateRatingsRequest,
+    application::{
+        auth::permissions::AdminUser,
+        services::{audit_service, replay_service},
+        state::SharedState,
+    },
+    domain::models::{audit::AuditLogQuery, recalculation::RecalculateRatingsRequest},
 };
 
 pub async fn recalculate_ratings_handler(
@@ -17,11 +26,21 @@ pub async fn recalculate_ratings_handler(
     Ok((StatusCode::OK, Json(response)))
 }
 
+pub async fn list_audit_log_handler(
+    State(state): State<SharedState>,
+    _admin: AdminUser,
+    Query(query): Query<AuditLogQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let response = audit_service::list_audit_log(&state, query).await?;
+
+    Ok(Json(response))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use axum::{Json, body::to_bytes, extract::State, response::IntoResponse};
+    use axum::{Json, body::to_bytes, extract::Query, extract::State, response::IntoResponse};
     use uuid::Uuid;
 
     use super::*;
@@ -99,6 +118,58 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(value["status"], "succeeded");
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn admin_can_view_audit_log_without_secrets() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let admin = admin_user(db.pool()).await;
+        crate::application::repositories::audit_repo::insert_audit_log_entry(
+            db.pool(),
+            crate::application::repositories::audit_repo::NewAuditLogEntry {
+                id: Uuid::new_v4(),
+                actor_user_id: Some(admin.id),
+                action: "test.secret".to_owned(),
+                entity_type: "test".to_owned(),
+                entity_id: None,
+                old_value: None,
+                new_value: Some(serde_json::json!({
+                    "username": "admin",
+                    "password_hash": "hash"
+                })),
+            },
+        )
+        .await
+        .expect("audit should insert");
+
+        let response = list_audit_log_handler(
+            State(state),
+            AdminUser(admin),
+            Query(AuditLogQuery { limit: Some(10) }),
+        )
+        .await
+        .expect("audit log should list")
+        .into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("test.secret"));
+        assert!(!body.contains("hash"));
+        assert!(!body.contains("password_hash"));
 
         db.drop()
             .await
