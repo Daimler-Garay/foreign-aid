@@ -103,4 +103,61 @@ mod tests {
             .await
             .expect("should drop temporary test database");
     }
+
+    #[tokio::test]
+    async fn migrations_create_production_schema_without_uuid_defaults() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+
+        let tables = [
+            "users",
+            "players",
+            "player_ratings",
+            "matches",
+            "match_players",
+            "audit_log",
+            "rating_recalculation_runs",
+        ];
+
+        for table in tables {
+            let exists: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+                .bind(format!("public.{table}"))
+                .fetch_one(db.pool())
+                .await
+                .expect("should check table existence");
+
+            assert!(exists, "expected table {table} to exist");
+        }
+
+        let id_defaults: Vec<Option<String>> = sqlx::query_scalar(
+            r#"
+            SELECT column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND column_name IN ('id', 'player_id')
+              AND table_name IN (
+                  'users',
+                  'players',
+                  'player_ratings',
+                  'matches',
+                  'audit_log',
+                  'rating_recalculation_runs'
+              )
+            ORDER BY table_name, column_name
+            "#,
+        )
+        .fetch_all(db.pool())
+        .await
+        .expect("should read id column defaults");
+
+        assert!(
+            id_defaults.iter().all(Option::is_none),
+            "application-owned UUID columns should not have database defaults"
+        );
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
 }
