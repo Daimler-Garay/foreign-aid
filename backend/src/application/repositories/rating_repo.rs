@@ -4,8 +4,14 @@ use uuid::Uuid;
 
 use crate::{application::repositories::RepositoryResult, domain::models::players::PlayerRating};
 
+// advisory is here to prevent simultaneous edits on a single row
+// any request to update the rating needs to acquire this lock before they can proceed
+// essentially preventing race conditions
 pub const RATING_MUTATION_ADVISORY_LOCK_ID: i64 = 74_000_001;
 
+// postgres offers two advisory lock 'pg_advisory_xact_lock()'
+// and pg_advisory_lock(), we use the former since it automatically
+// handles locking and unlocking for us lol
 pub async fn acquire_rating_mutation_lock<'e, E>(executor: E) -> RepositoryResult<()>
 where
     E: Executor<'e, Database = Postgres>,

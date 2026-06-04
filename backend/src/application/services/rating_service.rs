@@ -10,6 +10,8 @@ use uuid::Uuid;
 pub const DEFAULT_RATING: f64 = 25.0;
 pub const DEFAULT_UNCERTAINTY: f64 = DEFAULT_RATING / 3.0;
 pub const DISPLAY_RATING_SCALE: f64 = 40.0;
+// this is is here to guard against a new player immediately dominating the ratings
+// after a few matches
 pub const CONSERVATIVE_UNCERTAINTY_MULTIPLIER: f64 = 3.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,6 +56,11 @@ pub fn conservative_rank_score(rating: f64, uncertainty: f64) -> i32 {
         as i32
 }
 
+// core function it does the following:
+// 1. validation
+// 2. convert each player to a single 'team'
+// 3. pairs with MultiTeamOutcome::new(placement), lower equals better
+// 4. calls the algorithm (wenglin) and map the ratings
 pub fn rate_ranked_free_for_all(players: &[RatingInput]) -> Result<Vec<RatingUpdate>, RatingError> {
     validate_rating_inputs(players)?;
 
@@ -92,6 +99,7 @@ pub fn rate_ranked_free_for_all(players: &[RatingInput]) -> Result<Vec<RatingUpd
 }
 
 fn validate_rating_inputs(players: &[RatingInput]) -> Result<(), RatingError> {
+    // there has to be more than two players
     if players.len() < 2 {
         return Err(RatingError::RequiresAtLeastTwoPlayers);
     }
