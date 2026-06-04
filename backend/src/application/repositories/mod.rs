@@ -1,3 +1,4 @@
+pub mod audit_repo;
 pub mod player_repo;
 pub mod session_repo;
 pub mod user_repo;

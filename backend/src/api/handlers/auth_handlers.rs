@@ -4,6 +4,8 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use serde_json::json;
+use uuid::Uuid;
 
 use crate::{
     api::error::ApiError,
@@ -15,10 +17,15 @@ use crate::{
                 session_expires_at,
             },
         },
-        repositories::{session_repo, user_repo},
+        repositories::{
+            audit_repo::{self, NewAuditLogEntry},
+            session_repo, user_repo,
+        },
         state::SharedState,
     },
-    domain::models::auth::{AuthenticatedUser, CurrentUserResponse, LoginRequest, LoginResponse},
+    domain::models::auth::{
+        AuthenticatedUser, CurrentUserResponse, LoginRequest, LoginResponse, User,
+    },
 };
 
 pub async fn login_handler(
@@ -35,10 +42,12 @@ pub async fn login_handler(
 
     let Some(user) = user_repo::find_user_by_username(&state.db_pool, &request.username).await?
     else {
+        record_login_audit(&state, None, &request.username, false).await?;
         return Err(unauthorized());
     };
 
     if !user.active {
+        record_login_audit(&state, Some(&user), &request.username, false).await?;
         return Err(unauthorized());
     }
 
@@ -52,11 +61,13 @@ pub async fn login_handler(
         })?;
 
     if !password_matches {
+        record_login_audit(&state, Some(&user), &request.username, false).await?;
         return Err(unauthorized());
     }
 
     let session_id = new_session_id();
     session_repo::insert_session(&state.db_pool, session_id, user.id, session_expires_at()).await?;
+    record_login_audit(&state, Some(&user), &user.username, true).await?;
 
     let mut headers = HeaderMap::new();
     append_session_cookie(
@@ -77,6 +88,38 @@ pub async fn login_handler(
             },
         }),
     ))
+}
+
+async fn record_login_audit(
+    state: &SharedState,
+    user: Option<&User>,
+    username: &str,
+    succeeded: bool,
+) -> Result<(), ApiError> {
+    let (action, result) = if succeeded {
+        ("user.login", "success")
+    } else {
+        ("user.login_failed", "failure")
+    };
+
+    audit_repo::insert_audit_log_entry(
+        &state.db_pool,
+        NewAuditLogEntry {
+            id: Uuid::new_v4(),
+            actor_user_id: user.filter(|_| succeeded).map(|user| user.id),
+            action: action.to_owned(),
+            entity_type: "user".to_owned(),
+            entity_id: user.map(|user| user.id),
+            old_value: None,
+            new_value: Some(json!({
+                "username": username,
+                "result": result,
+            })),
+        },
+    )
+    .await?;
+
+    Ok(())
 }
 
 pub async fn logout_handler(
@@ -112,6 +155,7 @@ mod tests {
         response::IntoResponse,
     };
     use chrono::{Duration, Utc};
+    use serde_json::Value;
     use uuid::Uuid;
 
     use super::*;
@@ -125,6 +169,14 @@ mod tests {
         db::{Database, DatabaseOptions, options::PostgresOptions},
         domain::models::auth::UserRole,
     };
+
+    #[derive(Debug, sqlx::FromRow)]
+    struct AuditRow {
+        action: String,
+        actor_user_id: Option<Uuid>,
+        entity_id: Option<Uuid>,
+        new_value: Option<Value>,
+    }
 
     fn test_options() -> DatabaseOptions {
         DatabaseOptions {
@@ -149,21 +201,30 @@ mod tests {
         }
     }
 
+    async fn latest_audit_row(pool: &crate::db::DatabasePool) -> AuditRow {
+        sqlx::query_as::<_, AuditRow>(
+            r#"
+            SELECT action, actor_user_id, entity_id, new_value
+            FROM audit_log
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_one(pool)
+        .await
+        .expect("audit row should exist")
+    }
+
     #[tokio::test]
-    async fn valid_login_sets_session_cookie() {
+    async fn valid_login_sets_session_cookie_and_audits_success() {
         let db = Database::open_test_database(test_options())
             .await
             .expect("should create a temporary test database");
+        let user_id = Uuid::new_v4();
         let password_hash = hash_password("secret").expect("hash should succeed");
-        user_repo::insert_user(
-            db.pool(),
-            Uuid::new_v4(),
-            "admin",
-            &password_hash,
-            UserRole::Admin,
-        )
-        .await
-        .expect("user should insert");
+        user_repo::insert_user(db.pool(), user_id, "admin", &password_hash, UserRole::Admin)
+            .await
+            .expect("user should insert");
         let state = Arc::new(AppState {
             config: test_config(),
             db_pool: db.pool().clone(),
@@ -183,26 +244,32 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get(SET_COOKIE).is_some());
 
+        let audit = latest_audit_row(db.pool()).await;
+        assert_eq!(audit.action, "user.login");
+        assert_eq!(audit.actor_user_id, Some(user_id));
+        assert_eq!(audit.entity_id, Some(user_id));
+        assert_eq!(audit.new_value.as_ref().unwrap()["username"], "admin");
+        assert_eq!(audit.new_value.as_ref().unwrap()["result"], "success");
+        let audit_json =
+            serde_json::to_string(&audit.new_value).expect("audit value should serialize");
+        assert!(!audit_json.contains("secret"));
+        assert!(!audit_json.contains(&password_hash));
+
         db.drop()
             .await
             .expect("should drop temporary test database");
     }
 
     #[tokio::test]
-    async fn invalid_login_is_rejected_generically() {
+    async fn invalid_login_is_rejected_generically_and_audited_without_password() {
         let db = Database::open_test_database(test_options())
             .await
             .expect("should create a temporary test database");
+        let user_id = Uuid::new_v4();
         let password_hash = hash_password("secret").expect("hash should succeed");
-        user_repo::insert_user(
-            db.pool(),
-            Uuid::new_v4(),
-            "admin",
-            &password_hash,
-            UserRole::Admin,
-        )
-        .await
-        .expect("user should insert");
+        user_repo::insert_user(db.pool(), user_id, "admin", &password_hash, UserRole::Admin)
+            .await
+            .expect("user should insert");
         let state = Arc::new(AppState {
             config: test_config(),
             db_pool: db.pool().clone(),
@@ -224,9 +291,88 @@ mod tests {
         let response = error.into_response();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
+        let audit = latest_audit_row(db.pool()).await;
+        assert_eq!(audit.action, "user.login_failed");
+        assert_eq!(audit.actor_user_id, None);
+        assert_eq!(audit.entity_id, Some(user_id));
+        assert_eq!(audit.new_value.as_ref().unwrap()["username"], "admin");
+        assert_eq!(audit.new_value.as_ref().unwrap()["result"], "failure");
+        let audit_json =
+            serde_json::to_string(&audit.new_value).expect("audit value should serialize");
+        assert!(!audit_json.contains("wrong"));
+        assert!(!audit_json.contains(&password_hash));
+
         db.drop()
             .await
             .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn inactive_user_login_is_rejected_and_audited() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let user_id = Uuid::new_v4();
+        let password_hash = hash_password("secret").expect("hash should succeed");
+        user_repo::insert_user(db.pool(), user_id, "admin", &password_hash, UserRole::Admin)
+            .await
+            .expect("user should insert");
+        user_repo::set_user_active(db.pool(), user_id, false)
+            .await
+            .expect("user should deactivate");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+
+        let error = match login_handler(
+            State(state),
+            Json(LoginRequest {
+                username: "admin".to_owned(),
+                password: "secret".to_owned(),
+            }),
+        )
+        .await
+        {
+            Ok(_) => panic!("inactive login should fail"),
+            Err(error) => error,
+        };
+
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let audit = latest_audit_row(db.pool()).await;
+        assert_eq!(audit.action, "user.login_failed");
+        assert_eq!(audit.actor_user_id, None);
+        assert_eq!(audit.entity_id, Some(user_id));
+        assert_eq!(audit.new_value.as_ref().unwrap()["result"], "failure");
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn me_handler_returns_current_user() {
+        let user_id = Uuid::new_v4();
+        let player_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+
+        let Json(response) = me_handler(AuthenticatedUser {
+            id: user_id,
+            username: "admin".to_owned(),
+            role: "admin".to_owned(),
+            active: true,
+            player_id: Some(player_id),
+            session_id,
+        })
+        .await;
+
+        assert_eq!(response.id, user_id);
+        assert_eq!(response.username, "admin");
+        assert_eq!(response.role, "admin");
+        assert!(response.active);
+        assert_eq!(response.player_id, Some(player_id));
     }
 
     #[tokio::test]
