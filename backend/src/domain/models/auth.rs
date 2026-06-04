@@ -12,6 +12,26 @@ pub struct User {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, sqlx::FromRow)]
+pub struct UserSession {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_seen_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, sqlx::FromRow)]
+pub struct AuthenticatedUser {
+    pub id: Uuid,
+    pub username: String,
+    pub role: String,
+    pub active: bool,
+    pub player_id: Option<Uuid>,
+    pub session_id: Uuid,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
