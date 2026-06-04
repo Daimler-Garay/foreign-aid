@@ -1,4 +1,4 @@
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use thiserror::Error;
 
 use crate::db::{options::PostgresOptions, postgres::PostgresDatabase};
@@ -7,7 +7,7 @@ pub mod options;
 pub mod postgres;
 
 pub type DatabasePool = PgPool;
-pub type DatabaseConnection = PgConnection;
+#[cfg(test)]
 pub type TestDatabase = PostgresDatabase;
 
 #[derive(Clone, Debug)]
@@ -23,6 +23,7 @@ impl Database {
         Ok(db.pool().clone())
     }
 
+    #[cfg(test)]
     pub async fn open_test_database(
         options: DatabaseOptions,
     ) -> Result<TestDatabase, DatabaseError> {
@@ -60,6 +61,7 @@ mod tests {
     fn test_options() -> DatabaseOptions {
         DatabaseOptions {
             postgres: PostgresOptions {
+                database_url: None,
                 db: "foreign_aid".to_string(),
                 host: "localhost".to_string(),
                 port: 5433,

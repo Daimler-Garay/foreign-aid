@@ -5,13 +5,22 @@ use crate::application::app;
 mod api;
 mod application;
 mod db;
-mod domain;
 
 #[tokio::main]
 async fn main() {
-    // Tracing config
+    init_tracing();
+
+    tracing::info!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+
+    if let Err(error) = app::run().await {
+        tracing::error!(%error, "application startup failed");
+        std::process::exit(1);
+    }
+}
+
+fn init_tracing() {
     let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "axum_web=trace".into());
+        .unwrap_or_else(|_| "backend=info,tower_http=info".into());
     let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
         .with_target(false)
@@ -21,8 +30,4 @@ async fn main() {
         .with(filter_layer)
         .with(fmt_layer)
         .init();
-
-    tracing::info!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-
-    app::run().await;
 }

@@ -1,8 +1,8 @@
 use std::fmt::{Display, Formatter, Result};
 
 use axum::{
-    Form, Json,
-    http::{StatusCode, status},
+    Json,
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
@@ -31,6 +31,7 @@ pub enum ApiErrorCode {
     ResourceNotFound,
     ApiVersionError,
     DatabaseError,
+    ServiceUnavailable,
 }
 
 impl Display for ApiErrorCode {
@@ -102,26 +103,6 @@ impl ApiErrorEntry {
         self
     }
 
-    pub fn description(mut self, description: &str) -> Self {
-        self.description = Some(description.to_owned());
-        self
-    }
-
-    pub fn detail(mut self, detail: serde_json::Value) -> Self {
-        self.detail = Some(detail);
-        self
-    }
-
-    pub fn reason(mut self, reason: &str) -> Self {
-        self.reason = Some(reason.to_owned());
-        self
-    }
-
-    pub fn instance(mut self, instance: &str) -> Self {
-        self.instance = Some(instance.to_owned());
-        self
-    }
-
     pub fn trace_id(mut self) -> Self {
         let mut trace_id = uuid::Uuid::new_v4().to_string();
         trace_id.retain(|c| c != '-');
@@ -129,9 +110,10 @@ impl ApiErrorEntry {
         self
     }
 
-    pub fn help(mut self, help: &str) -> Self {
-        self.help = Some(help.to_owned());
-        self
+    fn public_code(&self, fallback_status: StatusCode) -> String {
+        self.code
+            .clone()
+            .unwrap_or_else(|| status_code_to_code(fallback_status))
     }
 }
 
@@ -145,23 +127,49 @@ impl From<StatusCode> for ApiErrorEntry {
 
 impl From<sqlx::Error> for ApiErrorEntry {
     fn from(e: sqlx::Error) -> Self {
-        if cfg!(debug_assertions) {
-            let (code, kind) = match e {
-                sqlx::Error::RowNotFound => (
-                    ApiErrorCode::ResourceNotFound,
-                    ApiErrorKind::ResourceNotFound,
-                ),
-                _ => (ApiErrorCode::DatabaseError, ApiErrorKind::DatabaseError),
-            };
-            Self::new(&e.to_string()).code(code).kind(kind).trace_id()
-        } else {
-            // build the entry with trace id to for locating purposes
-            let error_entry = Self::from(StatusCode::INTERNAL_SERVER_ERROR).trace_id();
-            let trace_id = error_entry.trace_id.as_deref().unwrap_or("");
-            // the error has to be logged so we dont fkn lose it
-            tracing::error!("SQLX error: {}, trace_id: {}", e.to_string(), trace_id);
-            error_entry
+        let error_entry = match e {
+            sqlx::Error::RowNotFound => Self::new("Resource not found.")
+                .code(ApiErrorCode::ResourceNotFound)
+                .kind(ApiErrorKind::ResourceNotFound),
+            _ => Self::new("A database error occurred.")
+                .code(ApiErrorCode::DatabaseError)
+                .kind(ApiErrorKind::DatabaseError),
         }
+        .trace_id();
+
+        let trace_id = error_entry.trace_id.as_deref().unwrap_or("");
+        tracing::error!(%e, trace_id, "SQLx error");
+
+        error_entry
+    }
+}
+
+impl ApiError {
+    pub fn new<S1, S2>(status_code: StatusCode, code: S1, message: S2) -> Self
+    where
+        S1: ToString,
+        S2: AsRef<str>,
+    {
+        Self {
+            status: status_code.as_u16(),
+            errors: vec![ApiErrorEntry::new(message.as_ref()).code(code)],
+        }
+    }
+
+    pub fn not_found<S1, S2>(code: S1, message: S2) -> Self
+    where
+        S1: ToString,
+        S2: AsRef<str>,
+    {
+        Self::new(StatusCode::NOT_FOUND, code, message)
+    }
+
+    pub fn service_unavailable<S1, S2>(code: S1, message: S2) -> Self
+    where
+        S1: ToString,
+        S2: AsRef<str>,
+    {
+        Self::new(StatusCode::SERVICE_UNAVAILABLE, code, message)
     }
 }
 
@@ -208,9 +216,70 @@ impl From<sqlx::Error> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        tracing::error!("Error response: {:?}", self);
         let status_code =
             StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        (status_code, Json(self)).into_response()
+        let error_entry = self
+            .errors
+            .first()
+            .cloned()
+            .unwrap_or_else(|| ApiErrorEntry::from(status_code));
+        let code = error_entry.public_code(status_code);
+
+        if status_code.is_server_error() {
+            tracing::error!(
+                status = status_code.as_u16(),
+                code,
+                message = error_entry.message,
+                "error response"
+            );
+        } else {
+            tracing::debug!(
+                status = status_code.as_u16(),
+                code,
+                message = error_entry.message,
+                "error response"
+            );
+        }
+
+        (
+            status_code,
+            Json(serde_json::json!({
+                "error": {
+                    "code": code,
+                    "message": error_entry.message,
+                }
+            })),
+        )
+            .into_response()
+    }
+}
+
+fn status_code_to_code(status_code: StatusCode) -> String {
+    status_code.to_string().replace(' ', "_").to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{body::to_bytes, http::StatusCode, response::IntoResponse};
+
+    use super::ApiError;
+
+    #[tokio::test]
+    async fn error_response_uses_public_envelope() {
+        let response = ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "validation_error",
+            "Placements must be sequential.",
+        )
+        .into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("body should be json");
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"]["code"], "validation_error");
+        assert_eq!(value["error"]["message"], "Placements must be sequential.");
     }
 }

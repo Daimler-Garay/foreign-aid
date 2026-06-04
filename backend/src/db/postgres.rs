@@ -1,12 +1,17 @@
+#[cfg(test)]
 use chrono::Utc;
-use sqlx::{AssertSqlSafe, PgPool, postgres::PgPoolOptions};
+#[cfg(test)]
+use sqlx::AssertSqlSafe;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 
 use crate::db::{DatabaseError, DatabaseOptions};
 
 #[non_exhaustive]
 pub struct PostgresDatabase {
     pool: PgPool,
+    #[cfg(test)]
     options: DatabaseOptions,
+    #[cfg(test)]
     test_db_to_drop: Option<String>,
 }
 
@@ -26,11 +31,14 @@ impl PostgresDatabase {
 
         Ok(Self {
             pool,
+            #[cfg(test)]
             options,
+            #[cfg(test)]
             test_db_to_drop: None,
         })
     }
 
+    #[cfg(test)]
     pub async fn connect_test(options: DatabaseOptions) -> Result<Self, DatabaseError> {
         // Generate a temporary name for the test ddatabase.
         let nanos_since_epoch = Utc::now().timestamp_nanos_opt().unwrap();
@@ -62,6 +70,7 @@ impl PostgresDatabase {
         &self.pool
     }
 
+    #[cfg(test)]
     pub async fn drop(&self) -> Result<(), DatabaseError> {
         if let Some(test_db_to_drop) = self.test_db_to_drop.as_ref() {
             // Close connections
@@ -77,6 +86,7 @@ impl PostgresDatabase {
     }
 }
 
+#[cfg(test)]
 fn create_database_sql(database_name: &str) -> String {
     format!(
         "CREATE DATABASE {}",
@@ -84,6 +94,7 @@ fn create_database_sql(database_name: &str) -> String {
     )
 }
 
+#[cfg(test)]
 fn drop_database_sql(database_name: &str) -> String {
     format!(
         "DROP DATABASE IF EXISTS {} WITH (FORCE)",
@@ -91,6 +102,7 @@ fn drop_database_sql(database_name: &str) -> String {
     )
 }
 
+#[cfg(test)]
 fn quote_postgres_identifier(identifier: &str) -> String {
     format!(r#""{}""#, identifier.replace('"', r#""""#))
 }
