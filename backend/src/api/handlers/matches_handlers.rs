@@ -1,121 +1,181 @@
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
-use sqlx::types::Uuid;
-use thiserror::Error;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::{
-    api::{
-        error::{ApiError, ApiErrorCode, ApiErrorEntry, ApiErrorKind},
-        version::ApiVersion,
-    },
-    application::{
-        repository::{matches_repo, player_repo},
-        state::SharedState,
-    },
-    domain::models::matches::{
-        CreateMatchRequest, JoinMatchRequest, Match, MatchDetail, MatchPlayer, MatchPlayerDetail,
-    },
+    api::error::ApiError,
+    application::{auth::permissions::AdminUser, services::match_service, state::SharedState},
+    domain::models::matches::CreateMatchRequest,
 };
 
-pub async fn create_match_handler(
-    api_version: ApiVersion,
+pub async fn submit_match_handler(
     State(state): State<SharedState>,
-    Json(matches): Json<CreateMatchRequest>,
+    admin: AdminUser,
+    Json(request): Json<CreateMatchRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
-    let host = player_repo::get_player_by_display_name(&matches.display_name, &state)
-        .await
-        // map host not found
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                let host_error = MatchError::HostNotFound(matches.display_name.clone());
-                (host_error.status_code(), ApiErrorEntry::from(host_error)).into()
-            }
-            _ => ApiError::from(e),
-        })?;
+    let response = match_service::submit_match(&state, &admin.into_inner(), request).await?;
 
-    let create_match = matches_repo::create_match(host.id, &matches, &state).await?;
-
-    Ok((StatusCode::CREATED, Json(create_match)))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
-pub async fn get_match_detail_by_id_handler(
-    api_version: ApiVersion,
-    State(state): State<SharedState>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<MatchDetail>, ApiError> {
-    tracing::trace!("api version {}", api_version);
-    tracing::trace!("match id: {}", id);
-    let matches = matches_repo::get_match_detail_by_id(id, &state)
-        .await
-        // handle match_id not found
-        .map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                let match_error = MatchError::MatchNotFound(id);
-                (match_error.status_code(), ApiErrorEntry::from(match_error)).into()
-            }
-            _ => ApiError::from(e),
-        })?;
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
 
-    Ok(Json(matches))
-}
+    use axum::{Json, body::to_bytes, extract::State, response::IntoResponse};
+    use chrono::{Duration, Utc};
+    use uuid::Uuid;
 
-pub async fn get_match_history_handler(
-    api_version: ApiVersion,
-    State(state): State<SharedState>,
-) -> Result<Json<Vec<MatchDetail>>, ApiError> {
-    tracing::trace!("api version: {}", api_version);
-    let history = matches_repo::get_match_history(&state).await?;
-    Ok(Json(history))
-}
+    use super::*;
+    use crate::{
+        application::{
+            config::Config,
+            repositories::{player_repo, user_repo},
+            state::AppState,
+        },
+        db::{Database, DatabaseOptions, options::PostgresOptions},
+        domain::models::{
+            auth::{AuthenticatedUser, UserRole},
+            matches::PlacementRequest,
+        },
+    };
 
-#[derive(Debug, Error)]
-enum MatchError {
-    #[error("host player not found: {0}")]
-    HostNotFound(String),
-    #[error("match id not found: {0}")]
-    MatchNotFound(Uuid),
-}
-
-impl MatchError {
-    const fn status_code(&self) -> StatusCode {
-        match self {
-            Self::HostNotFound(_) => StatusCode::NOT_FOUND,
-            Self::MatchNotFound(_) => StatusCode::NOT_FOUND,
+    fn test_options() -> DatabaseOptions {
+        DatabaseOptions {
+            postgres: PostgresOptions {
+                database_url: None,
+                db: "foreign_aid".to_string(),
+                host: "localhost".to_string(),
+                port: 5433,
+                user: "admin".to_string(),
+                password: "admin".to_string(),
+                max_connections: 5,
+            },
         }
     }
-}
 
-impl From<MatchError> for ApiErrorEntry {
-    fn from(match_error: MatchError) -> Self {
-        let message = match_error.to_string();
-
-        match match_error {
-            MatchError::HostNotFound(display_name) => Self::new(&message)
-                .code(ApiErrorCode::PlayerNotFound)
-                .kind(ApiErrorKind::ResourceNotFound)
-                .description(&format!(
-                    "host with the display name '{}' does not exist in our records",
-                    display_name
-                ))
-                .reason("host player must exist")
-                .trace_id()
-                .help("the host specified doesn't exist"),
-            MatchError::MatchNotFound(uuid) => Self::new(&message)
-                .code(ApiErrorCode::MatchNotFound)
-                .kind(ApiErrorKind::ResourceNotFound)
-                .reason("must be an existing match")
-                .description(&format!(
-                    "match with ID '{}' does not exist in our records",
-                    uuid
-                ))
-                .instance(&format!("/api/v1/matches/{}", uuid))
-                .trace_id()
-                .help("please check if the match identifier is correct"),
+    fn test_config() -> Config {
+        Config {
+            app_env: "test".to_owned(),
+            app_host: "127.0.0.1".to_owned(),
+            app_port: 0,
+            database: test_options().postgres,
         }
+    }
+
+    async fn admin_user(pool: &crate::db::DatabasePool) -> AuthenticatedUser {
+        let user_id = Uuid::new_v4();
+        user_repo::insert_user(pool, user_id, "admin", "hash", UserRole::Admin)
+            .await
+            .expect("admin should insert");
+
+        AuthenticatedUser {
+            id: user_id,
+            username: "admin".to_owned(),
+            role: "admin".to_owned(),
+            active: true,
+            player_id: None,
+            session_id: Uuid::new_v4(),
+        }
+    }
+
+    async fn player(pool: &crate::db::DatabasePool, display_name: &str) -> Uuid {
+        let player_id = Uuid::new_v4();
+        player_repo::insert_player(pool, player_id, display_name, None)
+            .await
+            .expect("player should insert");
+        player_repo::insert_default_rating(pool, player_id)
+            .await
+            .expect("rating should insert");
+
+        player_id
+    }
+
+    fn request(player_ids: &[Uuid]) -> CreateMatchRequest {
+        CreateMatchRequest {
+            played_at: Utc::now() - Duration::minutes(1),
+            notes: Some("handler test".to_owned()),
+            placements: player_ids
+                .iter()
+                .enumerate()
+                .map(|(index, player_id)| PlacementRequest {
+                    player_id: *player_id,
+                    placement: (index + 1) as i32,
+                })
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_can_submit_match() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let admin = admin_user(db.pool()).await;
+        let alice = player(db.pool(), "Alice").await;
+        let ben = player(db.pool(), "Ben").await;
+
+        let response =
+            submit_match_handler(State(state), AdminUser(admin), Json(request(&[alice, ben])))
+                .await
+                .expect("match should submit")
+                .into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("body should be json");
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(value["status"], "confirmed");
+        assert!(value["match_id"].as_str().is_some());
+        assert_eq!(value["rating_changes"].as_array().unwrap().len(), 2);
+        assert_eq!(value["rating_changes"][0]["placement"], 1);
+        assert!(value["rating_changes"][0]["old_display_rating"].is_i64());
+        assert!(value["rating_changes"][0]["new_display_rating"].is_i64());
+        assert!(value["rating_changes"][0]["display_delta"].is_i64());
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn match_submission_rejects_invalid_request() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let admin = admin_user(db.pool()).await;
+        let alice = player(db.pool(), "Alice").await;
+        let mut invalid = request(&[alice]);
+        invalid.placements.push(PlacementRequest {
+            player_id: alice,
+            placement: 2,
+        });
+
+        let error = match submit_match_handler(State(state), AdminUser(admin), Json(invalid)).await
+        {
+            Ok(_) => panic!("duplicate player should fail"),
+            Err(error) => error,
+        };
+        let response = error.into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("body should be json");
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["error"]["code"], "validation_error");
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
     }
 }

@@ -350,6 +350,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn submit_match_rejects_duplicate_player_without_storing_match() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let alice = create_player(db.pool(), "Alice").await;
+        let mut duplicate_player_request = request(&[alice]);
+        duplicate_player_request.placements.push(PlacementRequest {
+            player_id: alice,
+            placement: 2,
+        });
+
+        let error = submit_match(&state, &actor, duplicate_player_request)
+            .await
+            .expect_err("duplicate player should fail");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST.as_u16());
+        let match_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM matches")
+            .fetch_one(db.pool())
+            .await
+            .expect("match count should load");
+        let games_played: i32 =
+            sqlx::query_scalar("SELECT games_played FROM player_ratings WHERE player_id = $1")
+                .bind(alice)
+                .fetch_one(db.pool())
+                .await
+                .expect("rating should load");
+        assert_eq!(match_count, 0);
+        assert_eq!(games_played, 0);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
     async fn submit_match_rolls_back_when_match_insert_fails() {
         let db = Database::open_test_database(test_options())
             .await
@@ -391,6 +431,133 @@ mod tests {
         assert_eq!(match_count, 0);
         assert_eq!(participant_count, 0);
         assert_eq!(games_played, 0);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn submit_match_rolls_back_when_rating_update_fails() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let alice = create_player(db.pool(), "Alice").await;
+        let ben = create_player(db.pool(), "Ben").await;
+        sqlx::query(
+            r#"
+            UPDATE player_ratings
+            SET games_played = 2147483647,
+                wins = 2147483647,
+                losses = 0,
+                total_placement = 2147483647
+            WHERE player_id = $1
+            "#,
+        )
+        .bind(alice)
+        .execute(db.pool())
+        .await
+        .expect("rating should be moved to overflow edge");
+
+        let error = submit_match(&state, &actor, request(&[alice, ben]))
+            .await
+            .expect_err("rating stat overflow should fail");
+
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+        let match_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM matches")
+            .fetch_one(db.pool())
+            .await
+            .expect("match count should load");
+        let participant_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM match_players")
+            .fetch_one(db.pool())
+            .await
+            .expect("participant count should load");
+        let ben_games_played: i32 =
+            sqlx::query_scalar("SELECT games_played FROM player_ratings WHERE player_id = $1")
+                .bind(ben)
+                .fetch_one(db.pool())
+                .await
+                .expect("rating should load");
+        assert_eq!(match_count, 0);
+        assert_eq!(participant_count, 0);
+        assert_eq!(ben_games_played, 0);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn submit_match_rolls_back_when_audit_insert_fails() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let alice = create_player(db.pool(), "Alice").await;
+        let ben = create_player(db.pool(), "Ben").await;
+        sqlx::query(
+            r#"
+            CREATE FUNCTION test_fail_audit_insert()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RAISE EXCEPTION 'forced audit failure';
+                RETURN NEW;
+            END
+            $$
+            "#,
+        )
+        .execute(db.pool())
+        .await
+        .expect("audit failure function should create");
+        sqlx::query(
+            r#"
+            CREATE TRIGGER test_fail_audit_insert
+            BEFORE INSERT ON audit_log
+            FOR EACH ROW EXECUTE FUNCTION test_fail_audit_insert()
+            "#,
+        )
+        .execute(db.pool())
+        .await
+        .expect("audit failure trigger should create");
+
+        let error = submit_match(&state, &actor, request(&[alice, ben]))
+            .await
+            .expect_err("audit insert should fail");
+
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+        let match_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM matches")
+            .fetch_one(db.pool())
+            .await
+            .expect("match count should load");
+        let participant_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM match_players")
+            .fetch_one(db.pool())
+            .await
+            .expect("participant count should load");
+        let alice_games_played: i32 =
+            sqlx::query_scalar("SELECT games_played FROM player_ratings WHERE player_id = $1")
+                .bind(alice)
+                .fetch_one(db.pool())
+                .await
+                .expect("rating should load");
+        let audit_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
+            .fetch_one(db.pool())
+            .await
+            .expect("audit count should load");
+        assert_eq!(match_count, 0);
+        assert_eq!(participant_count, 0);
+        assert_eq!(alice_games_played, 0);
+        assert_eq!(audit_count, 0);
 
         db.drop()
             .await
