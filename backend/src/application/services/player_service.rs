@@ -9,6 +9,7 @@ use crate::{
             audit_repo::{self, NewAuditLogEntry},
             player_repo,
         },
+        services::rating_service::{conservative_rank_score, display_rating},
         state::SharedState,
     },
     domain::{
@@ -164,8 +165,8 @@ fn player_response(player: Player, rating: PlayerRating) -> PlayerResponse {
         display_name: player.display_name,
         active: player.active,
         rating: PlayerRatingSummary {
-            display_rating: (rating.rating * 40.0).round() as i32,
-            rank_score: ((rating.rating - (3.0 * rating.uncertainty)) * 40.0).round() as i32,
+            display_rating: display_rating(rating.rating),
+            rank_score: conservative_rank_score(rating.rating, rating.uncertainty),
             games_played: rating.games_played,
             wins: rating.wins,
             losses: rating.losses,
@@ -179,8 +180,8 @@ fn player_with_rating_response(player: PlayerWithRating) -> PlayerResponse {
         display_name: player.display_name,
         active: player.active,
         rating: PlayerRatingSummary {
-            display_rating: (player.rating * 40.0).round() as i32,
-            rank_score: ((player.rating - (3.0 * player.uncertainty)) * 40.0).round() as i32,
+            display_rating: display_rating(player.rating),
+            rank_score: conservative_rank_score(player.rating, player.uncertainty),
             games_played: player.games_played,
             wins: player.wins,
             losses: player.losses,

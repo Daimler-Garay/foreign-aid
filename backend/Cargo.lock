@@ -140,6 +140,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "serde_json",
+ "skillratings",
  "sqlx",
  "thiserror",
  "tokio",
@@ -1463,6 +1464,12 @@ dependencies = [
  "errno",
  "libc",
 ]
+
+[[package]]
+name = "skillratings"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d092cda2fa802e2e64f9ca9c6b54ffbb9a64c8bb585f6f7a601fedaea22b8b2"
 
 [[package]]
 name = "slab"
