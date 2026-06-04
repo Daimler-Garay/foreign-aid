@@ -19,7 +19,10 @@ use crate::{
     domain::{
         models::{
             auth::AuthenticatedUser,
-            matches::{CreateMatchRequest, MatchSubmissionResponse, RatingChangeResponse},
+            matches::{
+                CreateMatchRequest, MatchDetailResponse, MatchParticipantResponse, MatchResult,
+                MatchSubmissionResponse, MatchSummaryResponse, RatingChangeResponse,
+            },
             players::PlayerRating,
         },
         validation::{
@@ -31,6 +34,57 @@ use crate::{
 
 pub const RATING_ALGORITHM: &str = "weng_lin";
 pub const RATING_ALGORITHM_VERSION: i32 = 1;
+
+pub async fn list_matches(state: &SharedState) -> Result<Vec<MatchSummaryResponse>, ApiError> {
+    let matches = match_repo::list_matches(&state.db_pool).await?;
+
+    Ok(matches.into_iter().map(match_summary_response).collect())
+}
+
+pub async fn get_match(
+    state: &SharedState,
+    match_id: Uuid,
+) -> Result<MatchDetailResponse, ApiError> {
+    let match_result = match_repo::find_match_by_id(&state.db_pool, match_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("match_not_found", "Match was not found."))?;
+    let participants = match_repo::list_match_participants(&state.db_pool, match_id)
+        .await?
+        .into_iter()
+        .map(|participant| {
+            let old_display_rating = display_rating(participant.old_rating);
+            let new_display_rating = display_rating(participant.new_rating);
+
+            MatchParticipantResponse {
+                player_id: participant.player_id,
+                display_name: participant.display_name,
+                placement: participant.placement,
+                old_rating: participant.old_rating,
+                old_uncertainty: participant.old_uncertainty,
+                new_rating: participant.new_rating,
+                new_uncertainty: participant.new_uncertainty,
+                rating_delta: participant.rating_delta,
+                old_display_rating,
+                new_display_rating,
+                display_delta: new_display_rating - old_display_rating,
+            }
+        })
+        .collect();
+
+    Ok(MatchDetailResponse {
+        id: match_result.id,
+        played_at: match_result.played_at,
+        submitted_by_user_id: match_result.submitted_by_user_id,
+        status: match_result.status,
+        notes: match_result.notes,
+        rating_algorithm: match_result.rating_algorithm,
+        rating_algorithm_version: match_result.rating_algorithm_version,
+        corrected_from_match_id: match_result.corrected_from_match_id,
+        created_at: match_result.created_at,
+        updated_at: match_result.updated_at,
+        participants,
+    })
+}
 
 pub async fn submit_match(
     state: &SharedState,
@@ -166,6 +220,21 @@ pub async fn submit_match(
         status: inserted_match.status,
         rating_changes,
     })
+}
+
+fn match_summary_response(match_result: MatchResult) -> MatchSummaryResponse {
+    MatchSummaryResponse {
+        id: match_result.id,
+        played_at: match_result.played_at,
+        submitted_by_user_id: match_result.submitted_by_user_id,
+        status: match_result.status,
+        notes: match_result.notes,
+        rating_algorithm: match_result.rating_algorithm,
+        rating_algorithm_version: match_result.rating_algorithm_version,
+        corrected_from_match_id: match_result.corrected_from_match_id,
+        created_at: match_result.created_at,
+        updated_at: match_result.updated_at,
+    }
 }
 
 fn validation_error(error: ValidationError) -> ApiError {
@@ -311,6 +380,93 @@ mod tests {
                 .await
                 .expect("audit action should load");
         assert_eq!(audit_action, "match.created");
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn list_matches_returns_history_in_deterministic_order() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let alice = create_player(db.pool(), "Alice").await;
+        let ben = create_player(db.pool(), "Ben").await;
+        let older = submit_match(&state, &actor, request(&[alice, ben]))
+            .await
+            .expect("older match should submit");
+        let mut newer_request = request(&[ben, alice]);
+        newer_request.played_at += Duration::minutes(1);
+        let newer = submit_match(&state, &actor, newer_request)
+            .await
+            .expect("newer match should submit");
+
+        let matches = list_matches(&state).await.expect("matches should list");
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].id, newer.match_id);
+        assert_eq!(matches[1].id, older.match_id);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn get_match_returns_participants_and_rating_deltas() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let alice = create_player(db.pool(), "Alice").await;
+        let ben = create_player(db.pool(), "Ben").await;
+        let submitted = submit_match(&state, &actor, request(&[alice, ben]))
+            .await
+            .expect("match should submit");
+
+        let detail = get_match(&state, submitted.match_id)
+            .await
+            .expect("match detail should load");
+
+        assert_eq!(detail.id, submitted.match_id);
+        assert_eq!(detail.participants.len(), 2);
+        assert_eq!(detail.participants[0].player_id, alice);
+        assert_eq!(detail.participants[0].display_name, "Alice");
+        assert_eq!(detail.participants[0].placement, 1);
+        assert!(detail.participants[0].display_delta > 0);
+        assert_eq!(detail.participants[1].player_id, ben);
+        assert!(detail.participants[1].display_delta < 0);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn get_match_rejects_missing_match() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+
+        let error = get_match(&state, Uuid::new_v4())
+            .await
+            .expect_err("missing match should fail");
+
+        assert_eq!(error.status, StatusCode::NOT_FOUND.as_u16());
 
         db.drop()
             .await

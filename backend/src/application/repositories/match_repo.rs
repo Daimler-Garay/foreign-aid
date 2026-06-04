@@ -4,7 +4,8 @@ use uuid::Uuid;
 
 use crate::{
     application::repositories::RepositoryResult,
-    domain::models::matches::{MatchPlayer, MatchResult, MatchStatus},
+    db::DatabasePool,
+    domain::models::matches::{MatchParticipantRow, MatchPlayer, MatchResult, MatchStatus},
 };
 
 pub struct NewMatch {
@@ -98,6 +99,65 @@ where
     .await
 }
 
+pub async fn list_matches(pool: &DatabasePool) -> RepositoryResult<Vec<MatchResult>> {
+    sqlx::query_as::<_, MatchResult>(
+        r#"
+        SELECT id, played_at, submitted_by_user_id, status, notes,
+               rating_algorithm, rating_algorithm_version,
+               corrected_from_match_id, created_at, updated_at
+        FROM matches
+        ORDER BY played_at DESC, created_at DESC, id DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn find_match_by_id(
+    pool: &DatabasePool,
+    match_id: Uuid,
+) -> RepositoryResult<Option<MatchResult>> {
+    sqlx::query_as::<_, MatchResult>(
+        r#"
+        SELECT id, played_at, submitted_by_user_id, status, notes,
+               rating_algorithm, rating_algorithm_version,
+               corrected_from_match_id, created_at, updated_at
+        FROM matches
+        WHERE id = $1
+        "#,
+    )
+    .bind(match_id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn list_match_participants(
+    pool: &DatabasePool,
+    match_id: Uuid,
+) -> RepositoryResult<Vec<MatchParticipantRow>> {
+    sqlx::query_as::<_, MatchParticipantRow>(
+        r#"
+        SELECT
+            mp.match_id,
+            mp.player_id,
+            p.display_name,
+            mp.placement,
+            mp.old_rating,
+            mp.old_uncertainty,
+            mp.new_rating,
+            mp.new_uncertainty,
+            mp.rating_delta
+        FROM match_players mp
+        JOIN players p ON p.id = mp.player_id
+        WHERE mp.match_id = $1
+        ORDER BY mp.placement ASC, p.display_name ASC, mp.player_id ASC
+        "#,
+    )
+    .bind(match_id)
+    .fetch_all(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +234,55 @@ mod tests {
         assert_eq!(inserted_match.id, match_id);
         assert_eq!(inserted_match.status, "confirmed");
         assert_eq!(participant.player_id, player_id);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn list_matches_uses_deterministic_history_order() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let pool = db.pool();
+        let user_id = Uuid::new_v4();
+        user_repo::insert_user(pool, user_id, "admin", "hash", UserRole::Admin)
+            .await
+            .expect("user should insert");
+        let played_at = Utc::now();
+        let created_at = Utc::now();
+        let first_id = Uuid::from_u128(1);
+        let second_id = Uuid::from_u128(2);
+        let third_id = Uuid::from_u128(3);
+
+        for match_id in [first_id, second_id, third_id] {
+            insert_confirmed_match(
+                pool,
+                NewMatch {
+                    id: match_id,
+                    played_at,
+                    submitted_by_user_id: Some(user_id),
+                    notes: None,
+                    rating_algorithm: "weng_lin".to_owned(),
+                    rating_algorithm_version: 1,
+                },
+            )
+            .await
+            .expect("match should insert");
+            sqlx::query("UPDATE matches SET created_at = $2 WHERE id = $1")
+                .bind(match_id)
+                .bind(created_at)
+                .execute(pool)
+                .await
+                .expect("created_at should update");
+        }
+
+        let matches = list_matches(pool).await.expect("matches should list");
+
+        assert_eq!(matches[0].id, third_id);
+        assert_eq!(matches[1].id, second_id);
+        assert_eq!(matches[2].id, first_id);
 
         db.drop()
             .await
