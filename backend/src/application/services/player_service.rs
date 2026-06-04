@@ -15,7 +15,8 @@ use crate::{
         models::{
             auth::AuthenticatedUser,
             players::{
-                CreatePlayerRequest, Player, PlayerRating, PlayerRatingSummary, PlayerResponse,
+                CreatePlayerRequest, ListPlayersQuery, Player, PlayerRating, PlayerRatingSummary,
+                PlayerResponse, PlayerWithRating,
             },
         },
         validation::{ValidationError, player_validation::validate_display_name},
@@ -61,6 +62,30 @@ pub async fn create_player(
     Ok(player_response(player, rating))
 }
 
+pub async fn list_players(
+    state: &SharedState,
+    query: ListPlayersQuery,
+) -> Result<Vec<PlayerResponse>, ApiError> {
+    let players = player_repo::list_players_with_ratings(
+        &state.db_pool,
+        query.include_inactive.unwrap_or(false),
+    )
+    .await?;
+
+    Ok(players
+        .into_iter()
+        .map(player_with_rating_response)
+        .collect())
+}
+
+pub async fn get_player(state: &SharedState, player_id: Uuid) -> Result<PlayerResponse, ApiError> {
+    let player = player_repo::find_player_with_rating(&state.db_pool, player_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("player_not_found", "Player not found."))?;
+
+    Ok(player_with_rating_response(player))
+}
+
 fn player_response(player: Player, rating: PlayerRating) -> PlayerResponse {
     PlayerResponse {
         id: player.id,
@@ -72,6 +97,21 @@ fn player_response(player: Player, rating: PlayerRating) -> PlayerResponse {
             games_played: rating.games_played,
             wins: rating.wins,
             losses: rating.losses,
+        },
+    }
+}
+
+fn player_with_rating_response(player: PlayerWithRating) -> PlayerResponse {
+    PlayerResponse {
+        id: player.id,
+        display_name: player.display_name,
+        active: player.active,
+        rating: PlayerRatingSummary {
+            display_rating: (player.rating * 40.0).round() as i32,
+            rank_score: ((player.rating - (3.0 * player.uncertainty)) * 40.0).round() as i32,
+            games_played: player.games_played,
+            wins: player.wins,
+            losses: player.losses,
         },
     }
 }
@@ -261,6 +301,162 @@ mod tests {
         .expect_err("blank display name should fail");
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST.as_u16());
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn list_players_excludes_inactive_by_default() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+
+        let alice = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("alice should create");
+        let ben = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Ben".to_owned(),
+            },
+        )
+        .await
+        .expect("ben should create");
+        player_repo::set_player_active(db.pool(), ben.id, false)
+            .await
+            .expect("ben should deactivate");
+
+        let players = list_players(
+            &state,
+            ListPlayersQuery {
+                include_inactive: None,
+            },
+        )
+        .await
+        .expect("players should list");
+
+        assert_eq!(players.len(), 1);
+        assert_eq!(players[0].id, alice.id);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn list_players_can_include_inactive() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+
+        let alice = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("alice should create");
+        let ben = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Ben".to_owned(),
+            },
+        )
+        .await
+        .expect("ben should create");
+        player_repo::set_player_active(db.pool(), ben.id, false)
+            .await
+            .expect("ben should deactivate");
+
+        let players = list_players(
+            &state,
+            ListPlayersQuery {
+                include_inactive: Some(true),
+            },
+        )
+        .await
+        .expect("players should list");
+
+        assert_eq!(players.len(), 2);
+        assert_eq!(players[0].id, alice.id);
+        assert_eq!(players[1].id, ben.id);
+        assert!(!players[1].active);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn get_player_returns_rating_summary() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let created = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("player should create");
+
+        let player = get_player(&state, created.id)
+            .await
+            .expect("player should load");
+
+        assert_eq!(player.id, created.id);
+        assert_eq!(player.display_name, "Alice");
+        assert_eq!(player.rating.display_rating, 1000);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn get_player_rejects_missing_player() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+
+        let error = get_player(&state, Uuid::new_v4())
+            .await
+            .expect_err("missing player should fail");
+
+        assert_eq!(error.status, StatusCode::NOT_FOUND.as_u16());
 
         db.drop()
             .await

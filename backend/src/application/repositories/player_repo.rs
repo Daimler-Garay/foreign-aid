@@ -80,6 +80,37 @@ pub async fn find_player_with_rating(
     .await
 }
 
+pub async fn list_players_with_ratings(
+    pool: &DatabasePool,
+    include_inactive: bool,
+) -> RepositoryResult<Vec<PlayerWithRating>> {
+    sqlx::query_as::<_, PlayerWithRating>(
+        r#"
+        SELECT
+            p.id,
+            p.user_id,
+            p.display_name,
+            p.active,
+            p.created_at,
+            p.updated_at,
+            pr.rating,
+            pr.uncertainty,
+            pr.games_played,
+            pr.wins,
+            pr.losses,
+            pr.total_placement,
+            pr.last_played_at
+        FROM players p
+        JOIN player_ratings pr ON pr.player_id = p.id
+        WHERE $1 OR p.active = TRUE
+        ORDER BY p.display_name ASC, p.id ASC
+        "#,
+    )
+    .bind(include_inactive)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn set_player_active(
     pool: &DatabasePool,
     player_id: Uuid,

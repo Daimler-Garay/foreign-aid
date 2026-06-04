@@ -53,6 +53,11 @@ pub struct UpdatePlayerRequest {
     pub active: Option<bool>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListPlayersQuery {
+    pub include_inactive: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PlayerResponse {
     pub id: Uuid,

@@ -1,9 +1,14 @@
-use axum::{Router, routing::post};
+use axum::{Router, routing::get};
 
 use crate::{
-    api::handlers::player_handlers::create_player_handler, application::state::SharedState,
+    api::handlers::player_handlers::{
+        create_player_handler, get_player_handler, list_players_handler,
+    },
+    application::state::SharedState,
 };
 
 pub fn routes() -> Router<SharedState> {
-    Router::new().route("/", post(create_player_handler))
+    Router::new()
+        .route("/", get(list_players_handler).post(create_player_handler))
+        .route("/{id}", get(get_player_handler))
 }
