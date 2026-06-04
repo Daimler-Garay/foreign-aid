@@ -1,0 +1,54 @@
+name: Backend
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: foreign_aid
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U admin -d foreign_aid"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: test
+      APP_HOST: 127.0.0.1
+      APP_PORT: 3000
+      DATABASE_URL: postgres://admin:admin@localhost:5433/foreign_aid
+      DATABASE_MAX_CONNECTIONS: 5
+      RUST_LOG: info
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - name: Format
+        working-directory: backend
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: backend
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        working-directory: backend
+        run: cargo test
+      - name: Migration validation
+        working-directory: backend
+        run: cargo test db::tests::migrations_create_production_schema_without_uuid_defaults

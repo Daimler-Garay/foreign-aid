@@ -1,9 +1,15 @@
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
 use axum::{
     Json,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use chrono::{Duration, Utc};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -28,6 +34,11 @@ use crate::{
     },
 };
 
+const LOGIN_RATE_LIMIT_ATTEMPTS: usize = 5;
+const LOGIN_RATE_LIMIT_WINDOW_SECONDS: i64 = 60;
+static LOGIN_ATTEMPTS: OnceLock<Mutex<HashMap<String, Vec<chrono::DateTime<Utc>>>>> =
+    OnceLock::new();
+
 pub async fn login_handler(
     State(state): State<SharedState>,
     Json(request): Json<LoginRequest>,
@@ -39,6 +50,8 @@ pub async fn login_handler(
             "Invalid username or password.",
         )
     };
+
+    check_login_rate_limit(&request.username)?;
 
     let Some(user) = user_repo::find_user_by_username(&state.db_pool, &request.username).await?
     else {
@@ -68,6 +81,7 @@ pub async fn login_handler(
     let session_id = new_session_id();
     session_repo::insert_session(&state.db_pool, session_id, user.id, session_expires_at()).await?;
     record_login_audit(&state, Some(&user), &user.username, true).await?;
+    clear_login_rate_limit(&user.username);
 
     let mut headers = HeaderMap::new();
     append_session_cookie(
@@ -88,6 +102,35 @@ pub async fn login_handler(
             },
         }),
     ))
+}
+
+fn check_login_rate_limit(username: &str) -> Result<(), ApiError> {
+    let key = username.trim().to_ascii_lowercase();
+    let now = Utc::now();
+    let cutoff = now - Duration::seconds(LOGIN_RATE_LIMIT_WINDOW_SECONDS);
+    let attempts = LOGIN_ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut attempts = attempts.lock().expect("login attempts mutex poisoned");
+    let entries = attempts.entry(key).or_default();
+    entries.retain(|attempted_at| *attempted_at >= cutoff);
+
+    if entries.len() >= LOGIN_RATE_LIMIT_ATTEMPTS {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "Too many login attempts. Try again shortly.",
+        ));
+    }
+
+    entries.push(now);
+    Ok(())
+}
+
+fn clear_login_rate_limit(username: &str) {
+    let Some(attempts) = LOGIN_ATTEMPTS.get() else {
+        return;
+    };
+    let mut attempts = attempts.lock().expect("login attempts mutex poisoned");
+    attempts.remove(&username.trim().to_ascii_lowercase());
 }
 
 async fn record_login_audit(
@@ -154,7 +197,7 @@ mod tests {
         http::{StatusCode, header::SET_COOKIE},
         response::IntoResponse,
     };
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -301,6 +344,53 @@ mod tests {
             serde_json::to_string(&audit.new_value).expect("audit value should serialize");
         assert!(!audit_json.contains("wrong"));
         assert!(!audit_json.contains(&password_hash));
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn repeated_login_attempts_are_rate_limited() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let username = format!("rate-limited-{}", Uuid::new_v4());
+
+        for _ in 0..LOGIN_RATE_LIMIT_ATTEMPTS {
+            let error = match login_handler(
+                State(state.clone()),
+                Json(LoginRequest {
+                    username: username.clone(),
+                    password: "wrong".to_owned(),
+                }),
+            )
+            .await
+            {
+                Ok(_) => panic!("login should fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.status, StatusCode::UNAUTHORIZED.as_u16());
+        }
+
+        let error = match login_handler(
+            State(state),
+            Json(LoginRequest {
+                username,
+                password: "wrong".to_owned(),
+            }),
+        )
+        .await
+        {
+            Ok(_) => panic!("login should be rate limited"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS.as_u16());
 
         db.drop()
             .await
