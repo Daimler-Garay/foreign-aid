@@ -15,4 +15,8 @@ pub enum ValidationError {
     DuplicatePlacements,
     #[error("placements must start at 1 and be sequential")]
     NonSequentialPlacements,
+    #[error("match includes missing or inactive players")]
+    MissingOrInactivePlayers,
+    #[error("played_at cannot be too far in the future")]
+    PlayedAtTooFarInFuture,
 }
