@@ -80,6 +80,40 @@ pub async fn find_player_with_rating(
     .await
 }
 
+pub async fn find_player_with_rating_for_update<'e, E>(
+    executor: E,
+    player_id: Uuid,
+) -> RepositoryResult<Option<PlayerWithRating>>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, PlayerWithRating>(
+        r#"
+        SELECT
+            p.id,
+            p.user_id,
+            p.display_name,
+            p.active,
+            p.created_at,
+            p.updated_at,
+            pr.rating,
+            pr.uncertainty,
+            pr.games_played,
+            pr.wins,
+            pr.losses,
+            pr.total_placement,
+            pr.last_played_at
+        FROM players p
+        JOIN player_ratings pr ON pr.player_id = p.id
+        WHERE p.id = $1
+        FOR UPDATE OF p
+        "#,
+    )
+    .bind(player_id)
+    .fetch_optional(executor)
+    .await
+}
+
 pub async fn list_players_with_ratings(
     pool: &DatabasePool,
     include_inactive: bool,
@@ -108,6 +142,31 @@ pub async fn list_players_with_ratings(
     )
     .bind(include_inactive)
     .fetch_all(pool)
+    .await
+}
+
+pub async fn update_player<'e, E>(
+    executor: E,
+    player_id: Uuid,
+    display_name: Option<&str>,
+    active: Option<bool>,
+) -> RepositoryResult<Option<Player>>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, Player>(
+        r#"
+        UPDATE players
+        SET display_name = COALESCE($2, display_name),
+            active = COALESCE($3, active)
+        WHERE id = $1
+        RETURNING id, user_id, display_name, active, created_at, updated_at
+        "#,
+    )
+    .bind(player_id)
+    .bind(display_name)
+    .bind(active)
+    .fetch_optional(executor)
     .await
 }
 

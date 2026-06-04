@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::{
     api::error::ApiError,
     application::{auth::permissions::AdminUser, services::player_service, state::SharedState},
-    domain::models::players::{CreatePlayerRequest, ListPlayersQuery},
+    domain::models::players::{CreatePlayerRequest, ListPlayersQuery, UpdatePlayerRequest},
 };
 
 pub async fn list_players_handler(
@@ -34,6 +34,28 @@ pub async fn get_player_handler(
     let player = player_service::get_player(&state, player_id).await?;
 
     Ok(Json(player))
+}
+
+pub async fn update_player_handler(
+    State(state): State<SharedState>,
+    admin: AdminUser,
+    Path(player_id): Path<Uuid>,
+    Json(request): Json<UpdatePlayerRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let player =
+        player_service::update_player(&state, &admin.into_inner(), player_id, request).await?;
+
+    Ok(Json(player))
+}
+
+pub async fn delete_player_handler(
+    State(state): State<SharedState>,
+    admin: AdminUser,
+    Path(player_id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    player_service::deactivate_player(&state, &admin.into_inner(), player_id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
@@ -194,6 +216,105 @@ mod tests {
             .into_response();
 
         assert_eq!(response.status(), StatusCode::OK);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn admin_can_update_player() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let user_id = Uuid::new_v4();
+        user_repo::insert_user(db.pool(), user_id, "admin", "hash", UserRole::Admin)
+            .await
+            .expect("admin should insert");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = AuthenticatedUser {
+            id: user_id,
+            username: "admin".to_owned(),
+            role: "admin".to_owned(),
+            active: true,
+            player_id: None,
+            session_id: Uuid::new_v4(),
+        };
+        let created = player_service::create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("player should create");
+
+        let response = update_player_handler(
+            State(state),
+            AdminUser(actor),
+            Path(created.id),
+            Json(UpdatePlayerRequest {
+                display_name: Some("Alicia".to_owned()),
+                active: None,
+            }),
+        )
+        .await
+        .expect("player should update")
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn admin_can_delete_player_as_soft_deactivate() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let user_id = Uuid::new_v4();
+        user_repo::insert_user(db.pool(), user_id, "admin", "hash", UserRole::Admin)
+            .await
+            .expect("admin should insert");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = AuthenticatedUser {
+            id: user_id,
+            username: "admin".to_owned(),
+            role: "admin".to_owned(),
+            active: true,
+            player_id: None,
+            session_id: Uuid::new_v4(),
+        };
+        let created = player_service::create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("player should create");
+
+        let response =
+            delete_player_handler(State(state.clone()), AdminUser(actor), Path(created.id))
+                .await
+                .expect("player should delete")
+                .into_response();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let player = player_service::get_player(&state, created.id)
+            .await
+            .expect("player should still exist");
+        assert!(!player.active);
 
         db.drop()
             .await

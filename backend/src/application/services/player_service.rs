@@ -16,7 +16,7 @@ use crate::{
             auth::AuthenticatedUser,
             players::{
                 CreatePlayerRequest, ListPlayersQuery, Player, PlayerRating, PlayerRatingSummary,
-                PlayerResponse, PlayerWithRating,
+                PlayerResponse, PlayerWithRating, UpdatePlayerRequest,
             },
         },
         validation::{ValidationError, player_validation::validate_display_name},
@@ -86,6 +86,78 @@ pub async fn get_player(state: &SharedState, player_id: Uuid) -> Result<PlayerRe
     Ok(player_with_rating_response(player))
 }
 
+pub async fn update_player(
+    state: &SharedState,
+    actor: &AuthenticatedUser,
+    player_id: Uuid,
+    request: UpdatePlayerRequest,
+) -> Result<PlayerResponse, ApiError> {
+    if let Some(display_name) = &request.display_name {
+        validate_display_name(display_name).map_err(validation_error)?;
+    }
+    let display_name = request.display_name.as_deref().map(str::trim);
+
+    let mut tx = state.db_pool.begin().await?;
+    let before = player_repo::find_player_with_rating_for_update(&mut *tx, player_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("player_not_found", "Player not found."))?;
+    let updated = player_repo::update_player(&mut *tx, player_id, display_name, request.active)
+        .await
+        .map_err(player_write_error)?
+        .ok_or_else(|| ApiError::not_found("player_not_found", "Player not found."))?;
+    let rating = rating_from_player_with_rating(&before);
+
+    audit_repo::insert_audit_log_entry(
+        &mut *tx,
+        NewAuditLogEntry {
+            id: Uuid::new_v4(),
+            actor_user_id: Some(actor.id),
+            action: "player.updated".to_owned(),
+            entity_type: "player".to_owned(),
+            entity_id: Some(updated.id),
+            old_value: Some(player_audit_value(&before.display_name, before.active)),
+            new_value: Some(player_audit_value(&updated.display_name, updated.active)),
+        },
+    )
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(player_response(updated, rating))
+}
+
+pub async fn deactivate_player(
+    state: &SharedState,
+    actor: &AuthenticatedUser,
+    player_id: Uuid,
+) -> Result<(), ApiError> {
+    let mut tx = state.db_pool.begin().await?;
+    let before = player_repo::find_player_with_rating_for_update(&mut *tx, player_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("player_not_found", "Player not found."))?;
+    let updated = player_repo::update_player(&mut *tx, player_id, None, Some(false))
+        .await?
+        .ok_or_else(|| ApiError::not_found("player_not_found", "Player not found."))?;
+
+    audit_repo::insert_audit_log_entry(
+        &mut *tx,
+        NewAuditLogEntry {
+            id: Uuid::new_v4(),
+            actor_user_id: Some(actor.id),
+            action: "player.deactivated".to_owned(),
+            entity_type: "player".to_owned(),
+            entity_id: Some(updated.id),
+            old_value: Some(player_audit_value(&before.display_name, before.active)),
+            new_value: Some(player_audit_value(&updated.display_name, updated.active)),
+        },
+    )
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
 fn player_response(player: Player, rating: PlayerRating) -> PlayerResponse {
     PlayerResponse {
         id: player.id,
@@ -114,6 +186,27 @@ fn player_with_rating_response(player: PlayerWithRating) -> PlayerResponse {
             losses: player.losses,
         },
     }
+}
+
+fn rating_from_player_with_rating(player: &PlayerWithRating) -> PlayerRating {
+    PlayerRating {
+        player_id: player.id,
+        rating: player.rating,
+        uncertainty: player.uncertainty,
+        games_played: player.games_played,
+        wins: player.wins,
+        losses: player.losses,
+        total_placement: player.total_placement,
+        last_played_at: player.last_played_at,
+        updated_at: player.updated_at,
+    }
+}
+
+fn player_audit_value(display_name: &str, active: bool) -> serde_json::Value {
+    json!({
+        "display_name": display_name,
+        "active": active,
+    })
 }
 
 fn validation_error(error: ValidationError) -> ApiError {
@@ -457,6 +550,185 @@ mod tests {
             .expect_err("missing player should fail");
 
         assert_eq!(error.status, StatusCode::NOT_FOUND.as_u16());
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn update_player_changes_display_name_and_writes_audit_entry() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let created = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("player should create");
+
+        let updated = update_player(
+            &state,
+            &actor,
+            created.id,
+            UpdatePlayerRequest {
+                display_name: Some(" Alicia ".to_owned()),
+                active: None,
+            },
+        )
+        .await
+        .expect("player should update");
+
+        assert_eq!(updated.display_name, "Alicia");
+        assert!(updated.active);
+
+        let audit_action: String = sqlx::query_scalar(
+            "SELECT action FROM audit_log WHERE entity_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(created.id)
+        .fetch_one(db.pool())
+        .await
+        .expect("audit action should load");
+        assert_eq!(audit_action, "player.updated");
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn update_player_rejects_duplicate_display_name() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let alice = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("alice should create");
+        create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Ben".to_owned(),
+            },
+        )
+        .await
+        .expect("ben should create");
+
+        let error = update_player(
+            &state,
+            &actor,
+            alice.id,
+            UpdatePlayerRequest {
+                display_name: Some("Ben".to_owned()),
+                active: None,
+            },
+        )
+        .await
+        .expect_err("duplicate name should fail");
+
+        assert_eq!(error.status, StatusCode::CONFLICT.as_u16());
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn update_player_rejects_blank_display_name() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let created = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("player should create");
+
+        let error = update_player(
+            &state,
+            &actor,
+            created.id,
+            UpdatePlayerRequest {
+                display_name: Some(" ".to_owned()),
+                active: None,
+            },
+        )
+        .await
+        .expect_err("blank name should fail");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST.as_u16());
+
+        db.drop()
+            .await
+            .expect("should drop temporary test database");
+    }
+
+    #[tokio::test]
+    async fn deactivate_player_soft_deletes_and_writes_audit_entry() {
+        let db = Database::open_test_database(test_options())
+            .await
+            .expect("should create a temporary test database");
+        let state = Arc::new(AppState {
+            config: test_config(),
+            db_pool: db.pool().clone(),
+        });
+        let actor = admin_actor(db.pool()).await;
+        let created = create_player(
+            &state,
+            &actor,
+            CreatePlayerRequest {
+                display_name: "Alice".to_owned(),
+            },
+        )
+        .await
+        .expect("player should create");
+
+        deactivate_player(&state, &actor, created.id)
+            .await
+            .expect("player should deactivate");
+
+        let player = get_player(&state, created.id)
+            .await
+            .expect("player should still exist");
+        assert!(!player.active);
+
+        let audit_action: String = sqlx::query_scalar(
+            "SELECT action FROM audit_log WHERE entity_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(created.id)
+        .fetch_one(db.pool())
+        .await
+        .expect("audit action should load");
+        assert_eq!(audit_action, "player.deactivated");
 
         db.drop()
             .await
