@@ -15,7 +15,10 @@ use tokio::{
 };
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use crate::{api::error::ApiError, application::state::SharedState};
+use crate::{
+    api::{error::ApiError, routes::auth_routes},
+    application::state::SharedState,
+};
 
 pub async fn start(state: SharedState) -> Result<(), ServerError> {
     let addr = state.config.service_socket_addr()?;
@@ -38,6 +41,7 @@ pub fn router(state: SharedState) -> Router {
     Router::new()
         .route("/healthz", get(healthz_handler))
         .route("/readyz", get(readyz_handler))
+        .nest("/api/auth", auth_routes::routes())
         .fallback(error_404_handler)
         .with_state(state)
         .layer(CorsLayer::permissive())

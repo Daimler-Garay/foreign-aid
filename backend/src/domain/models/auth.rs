@@ -55,6 +55,11 @@ pub struct LoginRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct LoginResponse {
+    pub user: CurrentUserResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CurrentUserResponse {
     pub id: Uuid,
     pub username: String,
