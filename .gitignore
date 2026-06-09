@@ -30,3 +30,8 @@ rustc-ice-*.txt
 
 # Secrets
 .env
+backend/.env
+.local.env
+.production.env
+backend/.local.env
+backend/.production.env

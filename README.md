@@ -47,20 +47,16 @@ cd backend
 docker compose up -d postgres
 ```
 
-Create a local environment file from the example:
+Use the local environment file:
 
 ```bash
-cp .env.example .env
-```
-
-```env
-DATABASE_URL=postgres://admin:admin@localhost:5433/foreign_aid
+ENV_FILE=.local.env cargo run
 ```
 
 Run the backend:
 
 ```bash
-cargo run
+ENV_FILE=.local.env cargo run
 ```
 
 Open the app at:
