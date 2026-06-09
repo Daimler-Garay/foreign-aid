@@ -75,21 +75,74 @@ async function initLogin() {
 }
 
 async function initLeaderboard() {
+  let currentRows = [];
+
+  const rankLabel = (rank) => (rank == null ? "UR" : rank);
+  const percentage = (value) => (value == null ? "N/A" : `${Math.round(value * 100)}%`);
+  const averagePlacement = (value) => (value == null ? "N/A" : value.toFixed(2));
+
+  const renderRows = () => {
+    const search = qs("#player-search").value.trim().toLowerCase();
+    const rows = currentRows.filter((row) => row.display_name.toLowerCase().includes(search));
+    qs("#leaderboard-count").textContent = `${rows.length} player${rows.length === 1 ? "" : "s"}`;
+
+    if (rows.length === 0) {
+      qs("#leaderboard").innerHTML = `<div class="empty-state">No players match the current filters.</div>`;
+      return;
+    }
+
+    qs("#leaderboard").innerHTML = `<div class="rank-table" role="table" aria-label="Coup leaderboard">
+      <div class="rank-head" role="row">
+        <span>Rank</span>
+        <span>Player</span>
+        <span>Rating</span>
+        <span>Rank score</span>
+        <span>Record</span>
+        <span>Last played</span>
+      </div>
+      ${rows
+        .map(
+          (row) => `<div class="rank-row${row.rank == null ? " unranked" : ""}${row.active ? "" : " inactive"}" role="row">
+            <div class="rank-cell rank-number" role="cell">${rankLabel(row.rank)}</div>
+            <div class="rank-cell player-cell" role="cell">
+              <strong>${html(row.display_name)}</strong>
+              <span>${row.active ? "Active" : "Inactive"} - ${row.games_played} game${row.games_played === 1 ? "" : "s"} - Avg place ${averagePlacement(row.average_placement)}</span>
+            </div>
+            <div class="rank-cell metric-cell" role="cell">
+              <strong>${row.display_rating.toLocaleString()}</strong>
+              <span>display</span>
+            </div>
+            <div class="rank-cell metric-cell" role="cell">
+              <strong>${row.rank_score.toLocaleString()}</strong>
+              <span>conservative</span>
+            </div>
+            <div class="rank-cell metric-cell" role="cell">
+              <strong>${row.wins}-${row.losses}</strong>
+              <span>${percentage(row.win_rate)} win rate</span>
+            </div>
+            <div class="rank-cell last-played" role="cell">${formatDate(row.last_played_at) || "N/A"}</div>
+          </div>`,
+        )
+        .join("")}
+    </div>`;
+  };
+
   const render = async () => {
     const minGames = qs("#min-games").value || "3";
     const includeInactive = qs("#include-inactive").checked;
     try {
-      const rows = await api(`/api/leaderboard?min_games=${encodeURIComponent(minGames)}&include_inactive=${includeInactive}`);
-      qs("#leaderboard").innerHTML = table(
-        ["Rank", "Player", "Rating", "Score", "Games", "Wins", "Win Rate", "Avg Place", "Last Played"],
-        rows.map((row) => `<tr><td>${row.rank ?? "Unranked"}</td><td>${html(row.display_name)}</td><td>${row.display_rating}</td><td>${row.rank_score}</td><td>${row.games_played}</td><td>${row.wins}</td><td>${row.win_rate == null ? "" : `${Math.round(row.win_rate * 100)}%`}</td><td>${row.average_placement == null ? "" : row.average_placement.toFixed(2)}</td><td>${formatDate(row.last_played_at)}</td></tr>`),
-      );
+      currentRows = await api(`/api/leaderboard?min_games=${encodeURIComponent(minGames)}&include_inactive=${includeInactive}`);
+      renderRows();
       setStatus("");
     } catch (error) {
+      qs("#leaderboard-count").textContent = "Unavailable";
       setStatus(error.message, true);
     }
   };
   qs("#refresh").addEventListener("click", render);
+  qs("#player-search").addEventListener("input", renderRows);
+  qs("#min-games").addEventListener("change", render);
+  qs("#include-inactive").addEventListener("change", render);
   await render();
 }
 
@@ -110,13 +163,14 @@ async function initPlayers() {
   qs("#refresh").addEventListener("click", render);
   qs("#create-player-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formEl = event.currentTarget;
+    const form = new FormData(formEl);
     try {
       await api("/api/players", {
         method: "POST",
         body: JSON.stringify({ display_name: form.get("display_name") }),
       });
-      event.currentTarget.reset();
+      formEl.reset();
       setStatus("Created.", false, "#create-status");
       await render();
     } catch (error) {

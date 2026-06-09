@@ -1,13 +1,57 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Leaderboard</title><link rel="stylesheet" href="/app.css"></head>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Leaderboard</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
   <body data-page="leaderboard">
-    <header class="topbar"><div class="brand">Coup Leaderboard</div><nav class="nav"><a href="/leaderboard">Leaderboard</a><a href="/players">Players</a><a href="/matches">Matches</a><a href="/matches/new">Submit</a><a href="/admin/audit-log">Audit</a></nav></header>
-    <main class="main">
-      <div class="heading-row"><h1>Leaderboard</h1><button id="logout" class="secondary">Log Out</button></div>
-      <section class="panel stack">
-        <div class="actions"><label>Minimum games <input id="min-games" type="number" min="0" value="3"></label><label><span>Include inactive</span><input id="include-inactive" type="checkbox"></label><button id="refresh">Refresh</button></div>
+    <header class="topbar leaderboard-topbar">
+      <div class="brand mark">COUP<span>RANK</span></div>
+      <nav class="nav">
+        <a class="active" href="/leaderboard">Leaderboard</a>
+        <a href="/players">Players</a>
+        <a href="/matches">Matches</a>
+        <a href="/matches/new">Submit</a>
+        <a href="/admin/audit-log">Audit</a>
+      </nav>
+      <button id="logout" class="secondary compact">Log Out</button>
+    </header>
+    <main class="main leaderboard-main">
+      <section class="leaderboard-hero">
+        <div>
+          <h1>Coup Leaderboard</h1>
+        </div>
+        <div class="hero-meta">
+          <span>Leaderboard</span>
+          <strong id="leaderboard-count">Loading</strong>
+        </div>
+      </section>
+
+      <section class="leaderboard-tools">
+        <label class="search-field">
+          <span>Search players</span>
+          <input
+            id="player-search"
+            type="search"
+            autocomplete="off"
+            placeholder="Search players"
+          />
+        </label>
+        <label>
+          <span>Minimum games</span>
+          <input id="min-games" type="number" min="0" value="3" />
+        </label>
+        <label class="toggle-field">
+          <span>Include inactive</span>
+          <input id="include-inactive" type="checkbox" />
+        </label>
+        <button id="refresh">Refresh</button>
         <div id="status" class="status" role="status"></div>
+      </section>
+
+      <section class="leaderboard-board">
         <div id="leaderboard"></div>
       </section>
     </main>

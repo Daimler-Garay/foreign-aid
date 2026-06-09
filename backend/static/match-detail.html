@@ -2,9 +2,28 @@
 <html lang="en">
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Match Detail</title><link rel="stylesheet" href="/app.css"></head>
   <body data-page="match-detail">
-    <header class="topbar"><div class="brand">Coup Leaderboard</div><nav class="nav"><a href="/leaderboard">Leaderboard</a><a href="/players">Players</a><a href="/matches">Matches</a><a href="/matches/new">Submit</a><a href="/admin/audit-log">Audit</a></nav></header>
-    <main class="main stack">
-      <div class="heading-row"><h1>Match Detail</h1><button id="logout" class="secondary">Log Out</button></div>
+    <header class="topbar leaderboard-topbar">
+      <div class="brand mark">COUP<span>RANK</span></div>
+      <nav class="nav">
+        <a href="/leaderboard">Leaderboard</a>
+        <a href="/players">Players</a>
+        <a class="active" href="/matches">Matches</a>
+        <a href="/matches/new">Submit</a>
+        <a href="/admin/audit-log">Audit</a>
+      </nav>
+      <button id="logout" class="secondary compact">Log Out</button>
+    </header>
+    <main class="main leaderboard-main stack">
+      <section class="leaderboard-hero">
+        <div>
+          <p class="eyebrow">Match record</p>
+          <h1>Match Detail</h1>
+        </div>
+        <div class="hero-meta">
+          <span>Audit-safe</span>
+          <strong>Rating snapshot</strong>
+        </div>
+      </section>
       <section class="panel stack"><div id="status" class="status"></div><div id="match-detail"></div><div class="actions"><button id="void-match" class="danger">Void Match</button></div></section>
     </main>
     <script src="/app.js"></script>

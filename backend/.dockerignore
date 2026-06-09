@@ -1,4 +1,0 @@
-target
-.env
-.env_test
-rustc-ice-*.txt

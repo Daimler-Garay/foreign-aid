@@ -2,9 +2,28 @@
 <html lang="en">
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Audit Log</title><link rel="stylesheet" href="/app.css"></head>
   <body data-page="audit-log">
-    <header class="topbar"><div class="brand">Coup Leaderboard</div><nav class="nav"><a href="/leaderboard">Leaderboard</a><a href="/players">Players</a><a href="/matches">Matches</a><a href="/matches/new">Submit</a><a href="/admin/audit-log">Audit</a></nav></header>
-    <main class="main">
-      <div class="heading-row"><h1>Audit Log</h1><button id="logout" class="secondary">Log Out</button></div>
+    <header class="topbar leaderboard-topbar">
+      <div class="brand mark">COUP<span>RANK</span></div>
+      <nav class="nav">
+        <a href="/leaderboard">Leaderboard</a>
+        <a href="/players">Players</a>
+        <a href="/matches">Matches</a>
+        <a href="/matches/new">Submit</a>
+        <a class="active" href="/admin/audit-log">Audit</a>
+      </nav>
+      <button id="logout" class="secondary compact">Log Out</button>
+    </header>
+    <main class="main leaderboard-main">
+      <section class="leaderboard-hero">
+        <div>
+          <p class="eyebrow">System trail</p>
+          <h1>Audit Log</h1>
+        </div>
+        <div class="hero-meta">
+          <span>Admin</span>
+          <strong>Newest first</strong>
+        </div>
+      </section>
       <section class="panel stack"><div class="actions"><label>Limit <input id="limit" type="number" min="1" max="500" value="100"></label><button id="refresh">Refresh</button></div><div id="status" class="status"></div><div id="audit-log"></div></section>
     </main>
     <script src="/app.js"></script>

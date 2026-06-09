@@ -2,9 +2,28 @@
 <html lang="en">
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Matches</title><link rel="stylesheet" href="/app.css"></head>
   <body data-page="matches">
-    <header class="topbar"><div class="brand">Coup Leaderboard</div><nav class="nav"><a href="/leaderboard">Leaderboard</a><a href="/players">Players</a><a href="/matches">Matches</a><a href="/matches/new">Submit</a><a href="/admin/audit-log">Audit</a></nav></header>
-    <main class="main">
-      <div class="heading-row"><h1>Matches</h1><div class="actions"><a class="button" href="/matches/new">Submit Match</a><button id="logout" class="secondary">Log Out</button></div></div>
+    <header class="topbar leaderboard-topbar">
+      <div class="brand mark">COUP<span>RANK</span></div>
+      <nav class="nav">
+        <a href="/leaderboard">Leaderboard</a>
+        <a href="/players">Players</a>
+        <a class="active" href="/matches">Matches</a>
+        <a href="/matches/new">Submit</a>
+        <a href="/admin/audit-log">Audit</a>
+      </nav>
+      <button id="logout" class="secondary compact">Log Out</button>
+    </header>
+    <main class="main leaderboard-main">
+      <section class="leaderboard-hero">
+        <div>
+          <p class="eyebrow">Match history</p>
+          <h1>Matches</h1>
+        </div>
+        <div class="hero-meta">
+          <span>Results</span>
+          <a class="button compact" href="/matches/new">Submit Match</a>
+        </div>
+      </section>
       <section class="panel stack"><div id="status" class="status"></div><div id="matches"></div></section>
     </main>
     <script src="/app.js"></script>

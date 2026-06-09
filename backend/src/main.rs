@@ -8,9 +8,28 @@ async fn main() {
 
     tracing::info!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
-    if let Err(error) = app::run().await {
+    if let Err(error) = run_command().await {
         tracing::error!(%error, "application startup failed");
         std::process::exit(1);
+    }
+}
+
+async fn run_command() -> Result<(), app::StartupError> {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+
+    match args.as_slice() {
+        [] => app::run().await,
+        [command, username, password] if command == "seed-admin" => {
+            let username = app::seed_admin(username, password).await?;
+            tracing::info!(username, "admin user seeded");
+            Ok(())
+        }
+        [command, ..] if command == "seed-admin" => Err(app::StartupError::SeedAdmin(
+            "usage: cargo run -- seed-admin <username> <password>".to_owned(),
+        )),
+        [command, ..] => Err(app::StartupError::SeedAdmin(format!(
+            "unknown command '{command}'"
+        ))),
     }
 }
 
