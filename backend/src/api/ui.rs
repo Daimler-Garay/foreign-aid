@@ -3,6 +3,16 @@ use axum::{
     response::{Html, IntoResponse, Redirect},
 };
 
+const APP_CSS: &str = concat!(
+    include_str!("../../static/styles/foundation.css"),
+    "\n",
+    include_str!("../../static/styles/theme.css"),
+    "\n",
+    include_str!("../../static/styles/players.css"),
+    "\n",
+    include_str!("../../static/styles/leaderboard.css"),
+);
+
 pub async fn index() -> impl IntoResponse {
     Redirect::temporary("/leaderboard")
 }
@@ -36,10 +46,7 @@ pub async fn audit_log_page() -> impl IntoResponse {
 }
 
 pub async fn app_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../../static/app.css"),
-    )
+    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], APP_CSS)
 }
 
 pub async fn foundation_css() -> impl IntoResponse {
@@ -109,17 +116,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn app_stylesheet_imports_css_modules() {
+    async fn app_stylesheet_serves_bundled_css_modules() {
         let response = app_css().await.into_response();
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("body should read");
         let body = String::from_utf8(body.to_vec()).expect("body should be utf8");
 
-        assert!(body.contains("/styles/foundation.css"));
-        assert!(body.contains("/styles/theme.css"));
-        assert!(body.contains("/styles/players.css"));
-        assert!(body.contains("/styles/leaderboard.css"));
+        assert!(body.contains(":root"));
+        assert!(body.contains(".leaderboard-hero"));
+        assert!(body.contains(".players-grid"));
+        assert!(!body.contains("@import"));
 
         let response = leaderboard_css().await.into_response();
         let body = to_bytes(response.into_body(), usize::MAX)
