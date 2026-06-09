@@ -25,7 +25,7 @@ impl Config {
     {
         let app_env = lookup("APP_ENV").unwrap_or_else(|| "development".to_owned());
         let app_host = get_any(&lookup, &["APP_HOST", "SERVICE_HOST"])?;
-        let app_port = parse_any(&lookup, &["APP_PORT", "SERVICE_PORT"])?;
+        let app_port = parse_any(&lookup, &["APP_PORT", "SERVICE_PORT", "PORT"])?;
         let max_connections = parse_any_optional(
             &lookup,
             &["DATABASE_MAX_CONNECTIONS", "POSTGRES_CONNECTION_POOL"],
@@ -75,13 +75,9 @@ impl fmt::Debug for Config {
 }
 
 pub fn load() -> Result<Config, ConfigError> {
-    let env_file = if env_get_or("ENV_TEST", "0") == "1" {
-        ".env_test"
-    } else {
-        ".env"
-    };
+    let env_file = selected_env_file();
 
-    if dotenvy::from_filename(env_file).is_ok() {
+    if dotenvy::from_filename(&env_file).is_ok() {
         tracing::info!(env_file, "environment file loaded");
     } else {
         tracing::info!(
@@ -93,6 +89,23 @@ pub fn load() -> Result<Config, ConfigError> {
     let config = Config::load_from_lookup(|key| std::env::var(key).ok())?;
     tracing::debug!(?config, "configuration loaded");
     Ok(config)
+}
+
+fn selected_env_file() -> String {
+    selected_env_file_from_lookup(|key| std::env::var(key).ok())
+}
+
+fn selected_env_file_from_lookup<F>(lookup: F) -> String
+where
+    F: Fn(&str) -> Option<String>,
+{
+    lookup("ENV_FILE").unwrap_or_else(|| {
+        if lookup("ENV_TEST").as_deref() == Some("1") {
+            ".env_test".to_owned()
+        } else {
+            ".env".to_owned()
+        }
+    })
 }
 
 impl From<Config> for DatabaseOptions {
@@ -151,11 +164,6 @@ where
         .map_err(|_| ConfigError::Parse { key })
 }
 
-#[inline]
-fn env_get_or(key: &str, default: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +213,42 @@ mod tests {
             config.database.connection_url(),
             "postgres://admin:admin@localhost:5433/foreign_aid"
         );
+    }
+
+    #[test]
+    fn supports_platform_port_environment_key() {
+        let config = config_from(&[
+            ("APP_HOST", "0.0.0.0"),
+            ("PORT", "10000"),
+            ("DATABASE_URL", "postgres://user:secret@localhost:5432/app"),
+        ])
+        .expect("config should load");
+
+        assert_eq!(config.app_host, "0.0.0.0");
+        assert_eq!(config.app_port, 10000);
+    }
+
+    #[test]
+    fn default_env_file_is_dotenv() {
+        let file = selected_env_file_from_lookup(|_| None);
+
+        assert_eq!(file, ".env");
+    }
+
+    #[test]
+    fn env_file_can_be_selected_explicitly() {
+        let file = selected_env_file_from_lookup(|key| {
+            (key == "ENV_FILE").then(|| ".local.env".to_owned())
+        });
+
+        assert_eq!(file, ".local.env");
+    }
+
+    #[test]
+    fn test_env_file_is_used_for_test_mode() {
+        let file = selected_env_file_from_lookup(|key| (key == "ENV_TEST").then(|| "1".to_owned()));
+
+        assert_eq!(file, ".env_test");
     }
 
     #[test]
