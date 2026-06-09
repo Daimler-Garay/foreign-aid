@@ -1,11 +1,11 @@
 name: Backend
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - master
-      - main
 
 jobs:
   checks:
@@ -49,6 +49,23 @@ jobs:
       - name: Test
         working-directory: backend
         run: cargo test
-      - name: Migration validation
+      - name: Release build
         working-directory: backend
-        run: cargo test db::tests::migrations_create_production_schema_without_uuid_defaults
+        run: cargo build --release
+
+  deploy:
+    needs: checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is not configured; skipping deploy."
+            exit 0
+          fi
+
+          curl --fail --request POST "$RENDER_DEPLOY_HOOK_URL"
