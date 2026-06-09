@@ -8,10 +8,11 @@
         <a href="/leaderboard">Leaderboard</a>
         <a href="/players">Players</a>
         <a href="/matches">Matches</a>
-        <a href="/matches/new">Submit</a>
-        <a class="active" href="/admin/audit-log">Audit</a>
+        <a href="/matches/new" data-admin-only>Submit</a>
+        <a class="active" href="/admin/audit-log" data-admin-only>Audit</a>
       </nav>
-      <button id="logout" class="secondary compact">Log Out</button>
+      <a id="login-link" class="button secondary compact" href="/login" data-anonymous-only>Log In</a>
+      <button id="logout" class="secondary compact" data-auth-only>Log Out</button>
     </header>
     <main class="main leaderboard-main">
       <section class="leaderboard-hero">
@@ -24,7 +25,8 @@
           <strong>Newest first</strong>
         </div>
       </section>
-      <section class="panel stack"><div class="actions"><label>Limit <input id="limit" type="number" min="1" max="500" value="100"></label><button id="refresh">Refresh</button></div><div id="status" class="status"></div><div id="audit-log"></div></section>
+      <section class="panel stack" data-admin-only><div class="actions"><label>Limit <input id="limit" type="number" min="1" max="500" value="100"></label></div><div id="status" class="status"></div><div id="audit-log"></div></section>
+      <section class="panel stack" data-non-admin-only><h2>Admin Login Required</h2><p class="muted">Only admins can view the audit log.</p><a class="button compact" href="/login" data-anonymous-only>Log In</a></section>
     </main>
     <script src="/app.js"></script>
   </body>

@@ -1,4 +1,5 @@
 const page = document.body.dataset.page;
+let currentUser = null;
 
 function qs(selector) {
   return document.querySelector(selector);
@@ -46,11 +47,47 @@ function table(headers, rows) {
     .join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
 
+async function loadCurrentUser() {
+  try {
+    return await api("/api/auth/me");
+  } catch (_) {
+    return null;
+  }
+}
+
+function isAdmin() {
+  return currentUser?.role === "admin";
+}
+
+function applyAuthState() {
+  const admin = isAdmin();
+  const authenticated = Boolean(currentUser);
+
+  document.querySelectorAll("[data-admin-only]").forEach((element) => {
+    element.classList.toggle("auth-visible", admin);
+    element.classList.toggle("hidden", !admin);
+  });
+  document.querySelectorAll("[data-auth-only]").forEach((element) => {
+    element.classList.toggle("auth-visible", authenticated);
+    element.classList.toggle("hidden", !authenticated);
+  });
+  document.querySelectorAll("[data-anonymous-only]").forEach((element) => {
+    element.classList.toggle("auth-visible", !authenticated);
+    element.classList.toggle("hidden", authenticated);
+  });
+  document.querySelectorAll("[data-non-admin-only]").forEach((element) => {
+    element.classList.toggle("auth-visible", !admin);
+    element.classList.toggle("hidden", admin);
+  });
+}
+
 function wireLogout() {
   const button = qs("#logout");
   if (!button) return;
   button.addEventListener("click", async () => {
-    await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => null);
+    await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(
+      () => null,
+    );
     window.location.href = "/login";
   });
 }
@@ -78,20 +115,27 @@ async function initLeaderboard() {
   let currentRows = [];
 
   const rankLabel = (rank) => (rank == null ? "UR" : rank);
-  const percentage = (value) => (value == null ? "N/A" : `${Math.round(value * 100)}%`);
-  const averagePlacement = (value) => (value == null ? "N/A" : value.toFixed(2));
+  const percentage = (value) =>
+    value == null ? "N/A" : `${Math.round(value * 100)}%`;
+  const averagePlacement = (value) =>
+    value == null ? "N/A" : value.toFixed(2);
 
   const renderRows = () => {
     const search = qs("#player-search").value.trim().toLowerCase();
-    const rows = currentRows.filter((row) => row.display_name.toLowerCase().includes(search));
-    qs("#leaderboard-count").textContent = `${rows.length} player${rows.length === 1 ? "" : "s"}`;
+    const rows = currentRows.filter((row) =>
+      row.display_name.toLowerCase().includes(search),
+    );
+    qs("#leaderboard-count").textContent =
+      `${rows.length} player${rows.length === 1 ? "" : "s"}`;
 
     if (rows.length === 0) {
-      qs("#leaderboard").innerHTML = `<div class="empty-state">No players match the current filters.</div>`;
+      qs("#leaderboard").innerHTML =
+        `<div class="empty-state">No players match the current filters.</div>`;
       return;
     }
 
-    qs("#leaderboard").innerHTML = `<div class="rank-table" role="table" aria-label="Coup leaderboard">
+    qs("#leaderboard").innerHTML =
+      `<div class="rank-table" role="table" aria-label="Coup leaderboard">
       <div class="rank-head" role="row">
         <span>Rank</span>
         <span>Player</span>
@@ -102,7 +146,9 @@ async function initLeaderboard() {
       </div>
       ${rows
         .map(
-          (row) => `<div class="rank-row${row.rank == null ? " unranked" : ""}${row.active ? "" : " inactive"}" role="row">
+          (
+            row,
+          ) => `<div class="rank-row${row.rank == null ? " unranked" : ""}${row.active ? "" : " inactive"}" role="row">
             <div class="rank-cell rank-number" role="cell">${rankLabel(row.rank)}</div>
             <div class="rank-cell player-cell" role="cell">
               <strong>${html(row.display_name)}</strong>
@@ -129,9 +175,10 @@ async function initLeaderboard() {
 
   const render = async () => {
     const minGames = qs("#min-games").value || "3";
-    const includeInactive = qs("#include-inactive").checked;
     try {
-      currentRows = await api(`/api/leaderboard?min_games=${encodeURIComponent(minGames)}&include_inactive=${includeInactive}`);
+      currentRows = await api(
+        `/api/leaderboard?min_games=${encodeURIComponent(minGames)}`,
+      );
       renderRows();
       setStatus("");
     } catch (error) {
@@ -139,29 +186,64 @@ async function initLeaderboard() {
       setStatus(error.message, true);
     }
   };
-  qs("#refresh").addEventListener("click", render);
   qs("#player-search").addEventListener("input", renderRows);
   qs("#min-games").addEventListener("change", render);
-  qs("#include-inactive").addEventListener("change", render);
   await render();
 }
 
 async function initPlayers() {
+  const createDialog = qs("#create-player-dialog");
+  const createForm = qs("#create-player-form");
+  const playersContainer = qs("#players");
+
+  const closeCreateDialog = () => {
+    createDialog?.close();
+    setStatus("", false, "#create-status");
+  };
+
+  const renderPlayersTable = (rows) => {
+    playersContainer.innerHTML = table(
+      ["Name", "Active", "Rating", "Score", "Games", "Wins", "Losses"],
+      rows.map(
+        (row) => `<tr class="player-row">
+          <td>${html(row.display_name)}</td>
+          <td>${row.active ? "Yes" : "No"}</td>
+          <td>${row.rating.display_rating}</td>
+          <td>${row.rating.rank_score}</td>
+          <td>${row.rating.games_played}</td>
+          <td>${row.rating.wins}</td>
+          <td>${row.rating.losses}</td>
+        </tr>`,
+      ),
+    );
+  };
+
   const render = async () => {
     try {
-      const includeInactive = qs("#include-inactive").checked;
-      const rows = await api(`/api/players?include_inactive=${includeInactive}`);
-      qs("#players").innerHTML = table(
-        ["Name", "Active", "Rating", "Score", "Games", "Wins", "Losses"],
-        rows.map((row) => `<tr><td>${html(row.display_name)}</td><td>${row.active ? "Yes" : "No"}</td><td>${row.rating.display_rating}</td><td>${row.rating.rank_score}</td><td>${row.rating.games_played}</td><td>${row.rating.wins}</td><td>${row.rating.losses}</td></tr>`),
-      );
+      const rows = await api("/api/players");
+      renderPlayersTable(rows);
       setStatus("");
     } catch (error) {
       setStatus(error.message, true);
     }
   };
-  qs("#refresh").addEventListener("click", render);
-  qs("#create-player-form").addEventListener("submit", async (event) => {
+  qs("#open-create-player").addEventListener("click", () => {
+    if (!currentUser) {
+      window.location.href = "/login";
+      return;
+    }
+    if (!isAdmin()) {
+      setStatus("Admin access is required to create players.", true);
+      return;
+    }
+    createDialog?.showModal();
+    createForm?.elements.display_name?.focus();
+  });
+  qs("#close-create-player")?.addEventListener("click", closeCreateDialog);
+  createDialog?.addEventListener("click", (event) => {
+    if (event.target === createDialog) closeCreateDialog();
+  });
+  createForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formEl = event.currentTarget;
     const form = new FormData(formEl);
@@ -171,7 +253,8 @@ async function initPlayers() {
         body: JSON.stringify({ display_name: form.get("display_name") }),
       });
       formEl.reset();
-      setStatus("Created.", false, "#create-status");
+      closeCreateDialog();
+      setStatus("Created player.");
       await render();
     } catch (error) {
       setStatus(error.message, true, "#create-status");
@@ -184,8 +267,11 @@ async function initMatches() {
   try {
     const rows = await api("/api/matches");
     qs("#matches").innerHTML = table(
-      ["Played", "Status", "Notes", "Rating", "Detail"],
-      rows.map((row) => `<tr><td>${formatDate(row.played_at)}</td><td>${html(row.status)}</td><td>${html(row.notes)}</td><td>${html(row.rating_algorithm)} v${row.rating_algorithm_version}</td><td><a href="/matches/${row.id}">Open</a></td></tr>`),
+      ["Played", "Status", "Notes", "Detail"],
+      rows.map(
+        (row) =>
+          `<tr><td>${formatDate(row.played_at)}</td><td>${html(row.status)}</td><td>${html(row.notes)}</td><td><a href="/matches/${row.id}">Open</a></td></tr>`,
+      ),
     );
   } catch (error) {
     setStatus(error.message, true);
@@ -196,13 +282,18 @@ async function initMatchDetail() {
   const id = window.location.pathname.split("/").pop();
   const render = async () => {
     const detail = await api(`/api/matches/${id}`);
-    qs("#match-detail").innerHTML = `<div class="stack"><p><strong>Status:</strong> ${html(detail.status)}<br><strong>Played:</strong> ${formatDate(detail.played_at)}<br><strong>Notes:</strong> ${html(detail.notes)}</p>${table(
-      ["Place", "Player", "Old", "New", "Delta"],
-      detail.participants.map((row) => `<tr><td>${row.placement}</td><td>${html(row.display_name)}</td><td>${row.old_display_rating}</td><td>${row.new_display_rating}</td><td>${row.display_delta}</td></tr>`),
-    )}</div>`;
-    qs("#void-match").disabled = detail.status !== "confirmed";
+    qs("#match-detail").innerHTML =
+      `<div class="stack"><p><strong>Status:</strong> ${html(detail.status)}<br><strong>Played:</strong> ${formatDate(detail.played_at)}<br><strong>Notes:</strong> ${html(detail.notes)}</p>${table(
+        ["Place", "Player", "Old", "New", "Delta"],
+        detail.participants.map(
+          (row) =>
+            `<tr><td>${row.placement}</td><td>${html(row.display_name)}</td><td>${row.old_display_rating}</td><td>${row.new_display_rating}</td><td>${row.display_delta}</td></tr>`,
+        ),
+      )}</div>`;
+    const voidButton = qs("#void-match");
+    if (voidButton) voidButton.disabled = detail.status !== "confirmed";
   };
-  qs("#void-match").addEventListener("click", async () => {
+  qs("#void-match")?.addEventListener("click", async () => {
     try {
       await api(`/api/matches/${id}/void`, { method: "POST", body: "{}" });
       await render();
@@ -218,9 +309,16 @@ async function initMatchDetail() {
 }
 
 async function initSubmitMatch() {
+  if (!isAdmin()) {
+    setStatus("Admin login required to submit matches.", true);
+    return;
+  }
   const players = await api("/api/players");
   qs("#participant-fields").innerHTML = players
-    .map((player) => `<div class="participant-row"><label>${html(player.display_name)}<select name="player_id"><option value="">Not playing</option><option value="${player.id}">${html(player.display_name)}</option></select></label><label>Place <input name="placement:${player.id}" type="number" min="1"></label></div>`)
+    .map(
+      (player) =>
+        `<div class="participant-row"><label>${html(player.display_name)}<select name="player_id"><option value="">Not playing</option><option value="${player.id}">${html(player.display_name)}</option></select></label><label>Place <input name="placement:${player.id}" type="number" min="1"></label></div>`,
+    )
     .join("");
   qs("#submit-match-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -245,24 +343,31 @@ async function initSubmitMatch() {
 }
 
 async function initAuditLog() {
+  if (!isAdmin()) {
+    setStatus("Admin login required to view the audit log.", true);
+    return;
+  }
   const render = async () => {
     try {
       const limit = qs("#limit").value || "100";
-      const rows = await api(`/api/admin/audit-log?limit=${encodeURIComponent(limit)}`);
+      const rows = await api(
+        `/api/admin/audit-log?limit=${encodeURIComponent(limit)}`,
+      );
       qs("#audit-log").innerHTML = table(
         ["Created", "Action", "Entity", "Value"],
-        rows.map((row) => `<tr><td>${formatDate(row.created_at)}</td><td>${html(row.action)}</td><td>${html(row.entity_type)}</td><td><code>${html(JSON.stringify(row.new_value || row.old_value || {}))}</code></td></tr>`),
+        rows.map(
+          (row) =>
+            `<tr><td>${formatDate(row.created_at)}</td><td>${html(row.action)}</td><td>${html(row.entity_type)}</td><td><code>${html(JSON.stringify(row.new_value || row.old_value || {}))}</code></td></tr>`,
+        ),
       );
       setStatus("");
     } catch (error) {
       setStatus(error.message, true);
     }
   };
-  qs("#refresh").addEventListener("click", render);
+  qs("#limit").addEventListener("change", render);
   await render();
 }
-
-wireLogout();
 
 const initializers = {
   login: initLogin,
@@ -274,4 +379,11 @@ const initializers = {
   "audit-log": initAuditLog,
 };
 
-initializers[page]?.();
+async function main() {
+  currentUser = await loadCurrentUser();
+  applyAuthState();
+  wireLogout();
+  await initializers[page]?.();
+}
+
+main();

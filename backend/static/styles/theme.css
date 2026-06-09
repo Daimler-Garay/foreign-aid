@@ -1,0 +1,236 @@
+body {
+  color-scheme: dark;
+  --lb-bg: #050608;
+  --lb-panel: #111318;
+  --lb-panel-2: #171a21;
+  --lb-line: #2a2f39;
+  --lb-text: #f4f7fb;
+  --lb-muted: #a5afbf;
+  --lb-subtle: #707b8d;
+  --lb-accent: #f43f5e;
+  --lb-accent-2: #f59e0b;
+  --lb-good: #22c55e;
+  --focus: #60a5fa;
+  background:
+    linear-gradient(180deg, rgba(244, 63, 94, 0.08), transparent 260px),
+    var(--lb-bg);
+  color: var(--lb-text);
+}
+
+/* -- global edits for panels just use dev tools to check */
+.panel {
+  color: var(--lb-text);
+  background: var(--lb-panel);
+  border-color: var(--lb-line);
+  border-radius: 8px;
+  min-width: 0;
+  margin-top: 20px;
+}
+
+.panel h2 {
+  color: var(--lb-text);
+  font-size: 18px;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.muted,
+.status,
+label {
+  color: var(--lb-muted);
+}
+
+label {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+input,
+textarea,
+select {
+  height: 40px;
+  color: var(--lb-text);
+  background: #080a0e;
+  border-color: #343a45;
+  border-radius: 3px;
+}
+
+textarea {
+  height: auto;
+  min-height: 96px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--lb-subtle);
+}
+
+a {
+  color: var(--lb-text);
+}
+
+button,
+.button {
+  background: var(--lb-accent);
+  border-radius: 3px;
+  color: #ffffff;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition:
+    background 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+button:hover,
+.button:hover {
+  background: #fb7185;
+}
+
+button.secondary,
+.button.secondary {
+  background: var(--lb-panel-2);
+  border: 1px solid var(--lb-line);
+  color: var(--lb-text);
+}
+
+button.secondary:hover,
+.button.secondary:hover {
+  background: #222733;
+}
+
+button.danger {
+  background: #b42318;
+}
+
+button.danger:hover {
+  background: #dc2626;
+}
+
+.actions {
+  align-items: end;
+}
+
+.actions label {
+  min-width: 150px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.table-wrap {
+  border-color: var(--lb-line);
+  border-radius: 8px;
+  background: #050608;
+  max-width: 100%;
+  min-width: 0;
+}
+
+table {
+  color: var(--lb-text);
+}
+
+th,
+td {
+  border-bottom-color: #20242c;
+}
+
+th {
+  color: var(--lb-muted);
+  background: var(--lb-panel);
+  font-size: 12px;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+td {
+  background: #050608;
+}
+
+tr:hover td {
+  background: #0b0d12;
+}
+
+code {
+  display: inline-block;
+  max-width: 520px;
+  overflow-x: auto;
+  color: #dbeafe;
+  background: #080a0e;
+  border: 1px solid var(--lb-line);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.participant-row {
+  align-items: end;
+  padding: 12px;
+  background: #080a0e;
+  border: 1px solid var(--lb-line);
+  border-radius: 6px;
+}
+
+.leaderboard-topbar {
+  min-height: 48px;
+  padding: 0 20px;
+  background: #030405;
+  border-bottom-color: #20242c;
+}
+
+.leaderboard-topbar .nav {
+  align-items: center;
+  gap: clamp(12px, 2vw, 28px);
+  margin-left: auto;
+}
+
+.leaderboard-topbar .nav a {
+  color: var(--lb-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  transition: color 180ms ease;
+}
+
+.leaderboard-topbar .nav a:hover,
+.leaderboard-topbar .nav a.active {
+  color: var(--lb-accent);
+}
+
+.mark {
+  color: #ffffff;
+  font-size: 24px;
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mark span {
+  color: var(--lb-accent);
+}
+
+.login-brand {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+button.compact,
+.button.compact {
+  min-height: 34px;
+  padding: 7px 11px;
+}
+

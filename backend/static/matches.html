@@ -1,6 +1,11 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Matches</title><link rel="stylesheet" href="/app.css"></head>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Matches</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
   <body data-page="matches">
     <header class="topbar leaderboard-topbar">
       <div class="brand mark">COUP<span>RANK</span></div>
@@ -8,10 +13,19 @@
         <a href="/leaderboard">Leaderboard</a>
         <a href="/players">Players</a>
         <a class="active" href="/matches">Matches</a>
-        <a href="/matches/new">Submit</a>
-        <a href="/admin/audit-log">Audit</a>
+        <a href="/matches/new" data-admin-only>Submit</a>
+        <a href="/admin/audit-log" data-admin-only>Audit</a>
       </nav>
-      <button id="logout" class="secondary compact">Log Out</button>
+      <a
+        id="login-link"
+        class="button secondary compact"
+        href="/login"
+        data-anonymous-only
+        >Log In</a
+      >
+      <button id="logout" class="secondary compact" data-auth-only>
+        Log Out
+      </button>
     </header>
     <main class="main leaderboard-main">
       <section class="leaderboard-hero">
@@ -21,10 +35,15 @@
         </div>
         <div class="hero-meta">
           <span>Results</span>
-          <a class="button compact" href="/matches/new">Submit Match</a>
+          <a class="button compact" href="/matches/new" data-admin-only
+            >Submit Match</a
+          >
         </div>
       </section>
-      <section class="panel stack"><div id="status" class="status"></div><div id="matches"></div></section>
+
+      <section class="panel stack">
+        <div id="matches"></div>
+      </section>
     </main>
     <script src="/app.js"></script>
   </body>

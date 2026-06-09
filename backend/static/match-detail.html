@@ -8,10 +8,11 @@
         <a href="/leaderboard">Leaderboard</a>
         <a href="/players">Players</a>
         <a class="active" href="/matches">Matches</a>
-        <a href="/matches/new">Submit</a>
-        <a href="/admin/audit-log">Audit</a>
+        <a href="/matches/new" data-admin-only>Submit</a>
+        <a href="/admin/audit-log" data-admin-only>Audit</a>
       </nav>
-      <button id="logout" class="secondary compact">Log Out</button>
+      <a id="login-link" class="button secondary compact" href="/login" data-anonymous-only>Log In</a>
+      <button id="logout" class="secondary compact" data-auth-only>Log Out</button>
     </header>
     <main class="main leaderboard-main stack">
       <section class="leaderboard-hero">
@@ -24,7 +25,7 @@
           <strong>Rating snapshot</strong>
         </div>
       </section>
-      <section class="panel stack"><div id="status" class="status"></div><div id="match-detail"></div><div class="actions"><button id="void-match" class="danger">Void Match</button></div></section>
+      <section class="panel stack"><div id="status" class="status"></div><div id="match-detail"></div><div class="actions" data-admin-only><button id="void-match" class="danger">Void Match</button></div></section>
     </main>
     <script src="/app.js"></script>
   </body>

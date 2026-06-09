@@ -13,10 +13,11 @@
         <a class="active" href="/leaderboard">Leaderboard</a>
         <a href="/players">Players</a>
         <a href="/matches">Matches</a>
-        <a href="/matches/new">Submit</a>
-        <a href="/admin/audit-log">Audit</a>
+        <a href="/matches/new" data-admin-only>Submit</a>
+        <a href="/admin/audit-log" data-admin-only>Audit</a>
       </nav>
-      <button id="logout" class="secondary compact">Log Out</button>
+      <a id="login-link" class="button secondary compact" href="/login" data-anonymous-only>Log In</a>
+      <button id="logout" class="secondary compact" data-auth-only>Log Out</button>
     </header>
     <main class="main leaderboard-main">
       <section class="leaderboard-hero">
@@ -43,11 +44,6 @@
           <span>Minimum games</span>
           <input id="min-games" type="number" min="0" value="3" />
         </label>
-        <label class="toggle-field">
-          <span>Include inactive</span>
-          <input id="include-inactive" type="checkbox" />
-        </label>
-        <button id="refresh">Refresh</button>
         <div id="status" class="status" role="status"></div>
       </section>
 
